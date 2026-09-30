@@ -12,6 +12,14 @@ struct ContentView: View {
     @State private var countdownTask: Task<Void, Never>?
     @State private var dragBubble: CGPoint?
     @State private var connectChoice: ConnectChoice?
+    @State private var confirmDiscard: DiscardAction?
+
+    /// Cancel / Restart throw the take away. Ask first once it is long
+    /// enough that losing it would hurt.
+    enum DiscardAction: String, Identifiable {
+        case cancel, restart
+        var id: String { rawValue }
+    }
 
     enum SetupSection: String, CaseIterable {
         case sources = "Sources"
@@ -84,6 +92,19 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(engine.errorMessage ?? "")
+        }
+        .confirmationDialog(
+            confirmDiscard == .restart ? "Throw away this take and start over?" : "Throw away this take?",
+            isPresented: .init(get: { confirmDiscard != nil },
+                               set: { if !$0 { confirmDiscard = nil } }),
+            presenting: confirmDiscard
+        ) { action in
+            Button(action == .restart ? "Discard and Restart" : "Discard Recording", role: .destructive) {
+                if action == .restart { engine.restartRecording() } else { engine.cancelRecording() }
+            }
+            Button("Keep Recording", role: .cancel) {}
+        } message: { _ in
+            Text("What you've recorded so far will be deleted. Press Stop instead to keep it.")
         }
         .alert("Save preset", isPresented: $askPresetName) {
             TextField("Name", text: $presetName)
@@ -532,8 +553,10 @@ struct ContentView: View {
 
             if engine.soundMode != .off { MicMeterView(meter: engine.micMeter) }
 
-            pillButton("Cancel", icon: nil) { engine.cancelRecording() }
-            pillButton("Restart", icon: "arrow.counterclockwise") { engine.restartRecording() }
+            pillButton("Cancel", icon: nil) { requestDiscard(.cancel) }
+                .help("Stop and throw this take away")
+            pillButton("Restart", icon: "arrow.counterclockwise") { requestDiscard(.restart) }
+                .help("Throw this take away and record again")
 
             Button { engine.stopRecording() } label: {
                 HStack(spacing: 8) {
@@ -548,6 +571,16 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .keyboardShortcut("r")
         }
+    }
+
+    private func requestDiscard(_ action: DiscardAction) {
+        // A second or two of a false start is not worth a dialog.
+        if case .recording(let started) = engine.phase,
+           Date.now.timeIntervalSince(started) >= 5 {
+            confirmDiscard = action
+            return
+        }
+        if action == .restart { engine.restartRecording() } else { engine.cancelRecording() }
     }
 
     private var finishingBar: some View {
@@ -565,7 +598,7 @@ struct ContentView: View {
             if engine.recentProjects.isEmpty {
                 Text("No recordings yet")
             } else {
-                ForEach(engine.recentProjects) { project in
+                ForEach(engine.recentProjects.prefix(16)) { project in
                     Button {
                         engine.openProject(project)
                     } label: {
@@ -575,7 +608,7 @@ struct ContentView: View {
                 }
                 Divider()
                 Button("Show in Finder") {
-                    NSWorkspace.shared.open(CaptureEngine.recordingsRoot)
+                    CaptureEngine.revealRecordingsFolder()
                 }
             }
         } label: {
@@ -714,15 +747,15 @@ struct ContentView: View {
     }
 
     private var setupSubtitle: String {
-        var bits: [String] = ["Device"]
+        var bits: [String] = []
         switch engine.soundMode {
-        case .off: bits.append("No audio")
-        case .device: bits.append("Device")
+        case .off: bits.append("No sound")
+        case .device: bits.append("iPhone sound")
         case .mic: bits.append("Mic")
-        case .both: bits.append("Mic / Mac")
+        case .both: bits.append("Mic + iPhone")
         }
-        if engine.cameraEnabled { bits.append("Mac") }
-        return bits.joined(separator: " / ")
+        bits.append(engine.cameraEnabled ? "Camera on" : "No camera")
+        return bits.joined(separator: " · ")
     }
 
     private func pillButton(_ title: String, icon: String?, action: @escaping () -> Void) -> some View {
@@ -810,7 +843,8 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Text("Scene").font(.system(size: 16, weight: .semibold)).foregroundStyle(Frame.label)
-                Text(engine.selectedPhone?.localizedName ?? "No device")
+                Text(deviceChipTitle)
+                    .lineLimit(1)
                     .font(.system(size: 12))
                     .foregroundStyle(Frame.secondary)
                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -833,10 +867,19 @@ struct ContentView: View {
 
             HStack {
                 Menu {
-                    Button("Current look") {}
-                    if !savedPresets.isEmpty { Divider() }
+                    if savedPresets.isEmpty {
+                        Text("No saved presets yet")
+                    }
                     ForEach(savedPresets) { p in
                         Button(p.name) { engine.apply(preset: p) }
+                    }
+                    if !savedPresets.isEmpty {
+                        Divider()
+                        Menu("Delete Preset") {
+                            ForEach(savedPresets) { p in
+                                Button(p.name, role: .destructive) { deletePreset(p) }
+                            }
+                        }
                     }
                 } label: {
                     HStack {
@@ -1128,7 +1171,21 @@ struct ContentView: View {
     private func saveCurrentPreset() {
         let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        savedPresets.append(engine.snapshotPreset(named: name))
+        let preset = engine.snapshotPreset(named: name)
+        // Saving under an existing name updates that preset instead of
+        // piling up look-alike entries.
+        if let i = savedPresets.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            var updated = preset
+            updated.id = savedPresets[i].id
+            savedPresets[i] = updated
+        } else {
+            savedPresets.append(preset)
+        }
+        PresetStore.save(savedPresets)
+    }
+
+    private func deletePreset(_ preset: CapturePreset) {
+        savedPresets.removeAll { $0.id == preset.id }
         PresetStore.save(savedPresets)
     }
 }
@@ -1174,6 +1231,7 @@ private struct MicMeterView: View {
 struct HomeLandingView: View {
     @EnvironmentObject var engine: CaptureEngine
     @State private var connectChoice: ConnectChoice?
+    @State private var pendingTrash: CaptureEngine.RecentProject?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1259,6 +1317,16 @@ struct HomeLandingView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(engine.editorOpening)
+                            .contextMenu {
+                                Button("Open") { engine.openProject(project) }
+                                Button("Show in Finder") {
+                                    NSWorkspace.shared.activateFileViewerSelecting([project.dir])
+                                }
+                                Divider()
+                                Button("Move to Trash…", role: .destructive) {
+                                    pendingTrash = project
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 28)
@@ -1271,6 +1339,18 @@ struct HomeLandingView: View {
         .onAppear { engine.refreshRecentProjects() }
         .sheet(item: $connectChoice) { choice in
             ConnectSheet(choice: choice, engine: engine) { connectChoice = nil }
+        }
+        .confirmationDialog(
+            "Move this recording to the Trash?",
+            isPresented: .init(get: { pendingTrash != nil },
+                               set: { if !$0 { pendingTrash = nil } }),
+            presenting: pendingTrash
+        ) { project in
+            Button("Move to Trash", role: .destructive) {
+                engine.trashProject(at: project.dir)
+            }
+        } message: { project in
+            Text("\(project.displayName) — the raw recordings, edits, and any exports in its folder go to the Trash.")
         }
     }
 

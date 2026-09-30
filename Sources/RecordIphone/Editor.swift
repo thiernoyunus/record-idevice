@@ -326,10 +326,9 @@ final class EditorState: ObservableObject {
         duration = ClipAlignment.timelineDuration(
             phone: seconds.0, camera: seconds.1,
             cameraOffsetSeconds: cameraOffset.seconds)
-        trimEnd = duration
-        applySavedProject()
         // Phone writer often dies while the camera keeps rolling. With no
-        // mic that leftover is a frozen picture and no sound.
+        // mic that leftover is a frozen picture and no sound. Settle the
+        // final length before the saved trim / zooms / scenes are clamped.
         let useful = ClipAlignment.usefulEnd(
             phone: seconds.0, camera: seconds.1,
             cameraOffsetSeconds: cameraOffset.seconds,
@@ -337,7 +336,10 @@ final class EditorState: ObservableObject {
         if duration > useful + 0.4 {
             duration = useful
         }
+        trimEnd = duration
+        applySavedProject()
         if trimEnd > duration { trimEnd = duration }
+        if trimStart > max(0, trimEnd - 0.05) { trimStart = max(0, trimEnd - 0.5) }
         let audible = ClipAlignment.audiblePhoneLevel(
             saved: Double(phoneMix), hasMic: hasMicAudio,
             explicitSaved: phoneMixFromProject)
@@ -430,7 +432,7 @@ final class EditorState: ObservableObject {
     }
 
     private func apply(_ doc: ProjectDoc) {
-        trimStart = min(max(0, doc.trimStart), duration - 0.5)
+        trimStart = min(max(0, doc.trimStart), max(0, duration - 0.5))
         trimEnd = min(max(trimStart + 0.5, doc.trimEnd), duration)
         zooms = Self.sanitizedZooms(doc.zooms, duration: duration)
         if let bg = doc.background { engine.background = bg }
@@ -811,6 +813,7 @@ final class EditorState: ObservableObject {
     private struct EditSnapshot: Equatable {
         var trimStart: Double, trimEnd: Double
         var zooms: [ZoomSegment]
+        var scenes: [SceneClip]
         var background: BackgroundPreset
         var showBezel: Bool
         var bubbleFraction: CGFloat
@@ -842,6 +845,7 @@ final class EditorState: ObservableObject {
 
     private var currentSnapshot: EditSnapshot {
         EditSnapshot(trimStart: trimStart, trimEnd: trimEnd, zooms: zooms,
+                     scenes: scenes,
                      background: engine.background, showBezel: engine.showBezel,
                      bubbleFraction: engine.bubbleFraction, bubbleCenter: engine.bubbleCenter,
                      canvas: engine.canvas, presenterLayout: engine.presenterLayout,
@@ -889,6 +893,7 @@ final class EditorState: ObservableObject {
     private func apply(_ s: EditSnapshot) {
         isRestoringSnapshot = true
         trimStart = s.trimStart; trimEnd = s.trimEnd; zooms = s.zooms
+        scenes = s.scenes
         engine.background = s.background; engine.showBezel = s.showBezel
         engine.bubbleFraction = s.bubbleFraction; engine.bubbleCenter = s.bubbleCenter
         engine.canvas = s.canvas; engine.presenterLayout = s.presenterLayout
@@ -909,6 +914,7 @@ final class EditorState: ObservableObject {
         micMix = s.micAudioLevel
         applyPlaybackVolumes()
         if !zooms.contains(where: { $0.id == selectedZoomID }) { selectedZoomID = nil }
+        if !scenes.contains(where: { $0.id == selectedSceneID }) { selectedSceneID = nil }
         applyTrimToPlayback()
         refreshPreview(immediate: true)
         isRestoringSnapshot = false
@@ -1222,6 +1228,12 @@ final class EditorState: ObservableObject {
                 if line.hasPrefix("progress "), let p = Double(line.dropFirst(9)) {
                     Task { @MainActor [weak self] in
                         self?.exportProgress = min(max(p, 0), 1)
+                        self?.lastExportProgressAt = .now
+                    }
+                } else if line == "preparing" {
+                    // Long takes spend a while joining / mixing audio before
+                    // the first progress tick. Keep the watchdog calm.
+                    Task { @MainActor [weak self] in
                         self?.lastExportProgressAt = .now
                     }
                 } else if line.hasPrefix("OK ") || line.hasPrefix("FAIL") {

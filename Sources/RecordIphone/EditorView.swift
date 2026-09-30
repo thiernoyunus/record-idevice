@@ -68,7 +68,11 @@ struct EditorView: View {
             ))
             timelineScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                 guard event.modifierFlags.contains(.command) else { return event }
-                editor.bumpTimelineZoom(event.scrollingDeltaY > 0 ? 1.12 : 1 / 1.12)
+                // Trackpad momentum and sideways swipes send ~0 vertical
+                // deltas; treating those as "zoom out" made the ruler jump.
+                let delta = event.scrollingDeltaY
+                guard abs(delta) > 0.2 else { return nil }
+                editor.bumpTimelineZoom(delta > 0 ? 1.12 : 1 / 1.12)
                 return nil
             }
         }
@@ -969,34 +973,5 @@ final class PlayerLayerNSView: NSView {
 
     var gravity: AVLayerVideoGravity = .resizeAspectFill {
         didSet { (layer as? AVPlayerLayer)?.videoGravity = gravity }
-    }
-}
-
-/// ⌘-scroll zooms the timeline. Regular scroll still pans when zoomed in.
-private struct CommandScrollCatcher: NSViewRepresentable {
-    var onZoom: (Double) -> Void
-
-    func makeNSView(context: Context) -> Catcher {
-        let view = Catcher()
-        view.onZoom = onZoom
-        return view
-    }
-
-    func updateNSView(_ nsView: Catcher, context: Context) {
-        nsView.onZoom = onZoom
-    }
-
-    final class Catcher: NSView {
-        var onZoom: (Double) -> Void = { _ in }
-
-        override func scrollWheel(with event: NSEvent) {
-            if event.modifierFlags.contains(.command) {
-                let delta = event.scrollingDeltaY
-                guard abs(delta) > 0.2 else { return }
-                onZoom(delta > 0 ? 1.12 : 1 / 1.12)
-                return
-            }
-            super.scrollWheel(with: event)
-        }
     }
 }

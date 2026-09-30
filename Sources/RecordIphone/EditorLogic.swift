@@ -115,6 +115,27 @@ enum TimelineLayout {
     }
 }
 
+/// Ruler labels on the editor timeline.
+enum RulerTicks {
+    /// Keep labels at least this far apart so long takes stay readable.
+    static let minSpacing: Double = 56
+
+    /// Seconds between labels: the smallest "nice" step that fits.
+    static func step(viewDuration: Double, trackWidth: CGFloat) -> Double {
+        let steps: [Double] = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+        let pps = Double(max(trackWidth, 1)) / max(viewDuration, 0.1)
+        return steps.first { $0 * pps >= minSpacing } ?? 3600
+    }
+
+    /// "8s" under a minute, then "1:05", then "1:02:05".
+    static func label(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return String(format: "%d:%02d", s / 60, s % 60) }
+        return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+    }
+}
+
 /// Where phone.mov and camera.mov sit on the finished movie.
 ///
 /// `cameraOffset` is (camera start − phone start). A positive value means the
@@ -617,6 +638,16 @@ enum EditorLogicTests {
                abs(AudioJoinPolicy.nextStart(current: 1.0, duration: 10, skip: 0.5) - 10.5) < 0.001)
         expect("turning the camera on also records your voice",
                SoundPolicy.modeWhenTurningCameraOn(current: .device) == .both)
+
+        expect("a short take keeps a 2s ruler",
+               RulerTicks.step(viewDuration: 30, trackWidth: 1000) == 2)
+        expect("a 10 minute take does not crowd the ruler",
+               RulerTicks.step(viewDuration: 600, trackWidth: 1000) * (1000 / 600) >= RulerTicks.minSpacing)
+        expect("an hour-long take still gets a ruler step",
+               RulerTicks.step(viewDuration: 3600, trackWidth: 800) >= 300)
+        expect("ruler labels switch to minutes after 59s",
+               RulerTicks.label(8) == "8s" && RulerTicks.label(65) == "1:05"
+                && RulerTicks.label(3725) == "1:02:05")
 
         let report = lines.joined(separator: "\n")
         return (failed == 0, failed == 0 ? report + "\nOK editor-logic-check" : report + "\nFAIL editor-logic-check (\(failed))")

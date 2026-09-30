@@ -10,6 +10,7 @@ enum LaunchIntent {
 
 @main
 struct RecordIphoneApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var engine = CaptureEngine()
 
     init() {
@@ -21,6 +22,7 @@ struct RecordIphoneApp: App {
             ContentView()
                 .environmentObject(engine)
                 .onAppear {
+                    AppDelegate.engine = engine
                     engine.start()
                     if LaunchIntent.simulateStop {
                         LaunchIntent.simulateStop = false
@@ -46,17 +48,21 @@ struct RecordIphoneApp: App {
             SettingsView()
         }
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .undoRedo) {
-                Button("Undo") { engine.editor?.undo() }
-                    .keyboardShortcut("z")
-                    .disabled(!(engine.editor?.canUndo ?? false))
-                Button("Redo") { engine.editor?.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-                    .disabled(!(engine.editor?.canRedo ?? false))
-                Button("Remove Zoom") { engine.editor?.deleteSelectedZoom() }
-                    .keyboardShortcut(.delete)
-                    .disabled(engine.editor?.selectedZoomID == nil)
+            CommandGroup(replacing: .newItem) {
+                Button("Open Recording…") { engine.chooseAndOpenFolder() }
+                    .keyboardShortcut("o")
+                    .disabled(engine.editor != nil)
+            }
+            CommandGroup(replacing: .undoRedo) {
+                if let editor = engine.editor {
+                    EditorUndoCommands(editor: editor)
+                } else {
+                    // Outside the editor, keep ⌘Z working in text fields.
+                    Button("Undo") { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
+                        .keyboardShortcut("z")
+                    Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                        .keyboardShortcut("z", modifiers: [.command, .shift])
+                }
             }
             CommandMenu("Recording") {
                 Button("Connect Wirelessly…") {
@@ -68,7 +74,7 @@ struct RecordIphoneApp: App {
                     if engine.recentProjects.isEmpty {
                         Text("No recordings yet")
                     } else {
-                        ForEach(engine.recentProjects) { project in
+                        ForEach(engine.recentProjects.prefix(16)) { project in
                             Button(project.displayName) {
                                 engine.openProject(project)
                             }
@@ -76,19 +82,68 @@ struct RecordIphoneApp: App {
                     }
                 }
                 Button("Show Recordings in Finder") {
-                    NSWorkspace.shared.open(CaptureEngine.recordingsRoot)
+                    CaptureEngine.revealRecordingsFolder()
                 }
                 Divider()
+                // ⌘, already belongs to the app menu's Settings item.
                 Button("Settings…") {
                     NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 }
-                .keyboardShortcut(",", modifiers: [.command])
                 Button("Refresh Recent") {
                     engine.refreshRecentProjects()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
+    }
+}
+
+/// Quitting mid-take leaves a movie file with no index (unplayable), and
+/// quitting mid-export throws the export away. Ask first.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static weak var engine: CaptureEngine?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard let engine = Self.engine else { return .terminateNow }
+            let busy: String?
+            switch engine.phase {
+            case .arming, .recording:
+                busy = "A recording is still running. Press Stop first to keep it."
+            case .finishing:
+                busy = "Your recording is still being saved."
+            case .idle:
+                busy = engine.editor?.exportProgress != nil
+                    ? "A movie is still exporting." : nil
+            }
+            guard let busy else { return .terminateNow }
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Quit Record iPhone?"
+            alert.informativeText = busy + " If you quit now, it may be lost."
+            alert.addButton(withTitle: "Don't Quit")
+            alert.addButton(withTitle: "Quit Anyway")
+            return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        }
+    }
+}
+
+/// Menu items that watch the editor directly, so Undo / Redo enable the
+/// moment an edit lands (the engine does not republish editor changes).
+private struct EditorUndoCommands: View {
+    @ObservedObject var editor: EditorState
+
+    var body: some View {
+        Button("Undo") { editor.undo() }
+            .keyboardShortcut("z")
+            .disabled(!editor.canUndo)
+        Button("Redo") { editor.redo() }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!editor.canRedo)
+        Divider()
+        Button("Remove Zoom") { editor.deleteSelectedZoom() }
+            .keyboardShortcut(.delete)
+            .disabled(editor.selectedZoomID == nil)
     }
 }
 
@@ -578,6 +633,19 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
     let started = Date()
     let done = DispatchSemaphore(value: 0)
     var exitCode: Int32 = 1
+    let encoding = OnceFlag()
+
+    // Joining parts, repairing files and mixing audio print no progress.
+    // On a long take that can outlast the editor's 60s silence watchdog,
+    // so say "still preparing" until the encoder reports real progress.
+    // Capped so a genuinely wedged prep still gets caught by the watchdog.
+    DispatchQueue.global(qos: .utility).async {
+        let prepLimit = Date().addingTimeInterval(20 * 60)
+        while !encoding.isSet, Date() < prepLimit {
+            print("preparing")
+            Thread.sleep(forTimeInterval: 5)
+        }
+    }
 
     Task {
         do {
@@ -585,18 +653,21 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
                 phoneURL: phoneURL, cameraURL: cameraURL, cameraOffset: offset,
                 layout: layout, zooms: zooms, trim: trim, outputURL: outputURL,
                 phoneAudioLevel: phoneAudioLevel, micAudioLevel: micAudioLevel,
-                onProgress: { p in print(String(format: "progress %.4f", p)) })
+                onProgress: { p in
+                    encoding.mark()
+                    print(String(format: "progress %.4f", p))
+                })
             print(String(format: "OK %@ in %.1fs", out.path, Date().timeIntervalSince(started)))
             exitCode = 0
         } catch {
             print("FAIL: \(error)")
             exitCode = 1
         }
+        encoding.mark()
         done.signal()
     }
-    if done.wait(timeout: .now() + 600) == .timedOut {
-        print("TIMEOUT: export still not finished after 600s")
-        exit(2)
-    }
+    // No overall time cap: an hour-long take legitimately encodes for many
+    // minutes. The editor kills this worker if progress goes silent.
+    done.wait()
     exit(exitCode)
 }

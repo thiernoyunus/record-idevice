@@ -196,14 +196,16 @@ struct TimelineStrip: View {
     }
 
     private func timeRuler(view: TimelineLayout.KeepWindow) -> some View {
-        let step: Double = view.viewDur > 40 ? 5 : 2
+        let step = RulerTicks.step(viewDuration: view.viewDur, trackWidth: view.trackWidth)
         let marks = stride(from: 0.0, through: view.viewDur, by: step).map { $0 }
         return ZStack(alignment: .topLeading) {
             ForEach(marks, id: \.self) { t in
-                Text("\(Int(t))s")
+                let label = RulerTicks.label(t)
+                Text(label)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(Frame.tertiary)
-                    .offset(x: max(0, t * view.pps - (t == 0 ? 0 : 8)))
+                    .fixedSize()
+                    .offset(x: max(0, t * view.pps - (t == 0 ? 0 : CGFloat(label.count) * 3.3)))
             }
         }
         .frame(width: view.trackWidth, height: 12, alignment: .topLeading)
