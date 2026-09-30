@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Screen / camera / audio lanes + a full-height playhead, like a regular editor.
 struct TimelineStrip: View {
@@ -8,11 +9,12 @@ struct TimelineStrip: View {
     @State private var trimStartBase: Double?
     @State private var trimEndBase: Double?
     @State private var trimDragPPS: CGFloat?
-    @State private var playheadBase: Double?
-    @State private var hoverZoomX: CGFloat?
     @State private var snapGuideX: CGFloat?
     @State private var isEditingZoom = false
-    @State private var isScrubbing = false
+    /// Held as plain references (not observed) so pointer movement redraws
+    /// only the little hover views, never the whole strip.
+    @State private var hover = TimelineHover()
+    @State private var zoomHover = TimelineHover()
 
     private let labelW: CGFloat = 64
 
@@ -20,10 +22,6 @@ struct TimelineStrip: View {
         GeometryReader { geo in
             let trackW = max(geo.size.width - labelW, 1)
             let view = layoutWindow(trackWidth: trackW)
-            let needleX = TimelineLayout.playheadX(
-                time: editor.currentTime,
-                window: view,
-                labelWidth: labelW)
 
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -61,6 +59,18 @@ struct TimelineStrip: View {
                         zoomLane(view: view)
                     }
                 }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p) where p.x >= labelW:
+                        hover.x = min(p.x - labelW, view.trackWidth)
+                    default:
+                        hover.x = nil
+                    }
+                }
+
+                HoverGuide(hover: hover, clock: editor.clock, view: view,
+                           trimStart: editor.trimStart, labelW: labelW,
+                           height: geo.size.height)
 
                 if let gx = snapGuideX {
                     Rectangle()
@@ -72,17 +82,14 @@ struct TimelineStrip: View {
 
                 // Needle sits on top so you can grab it. Trim / zoom use their
                 // own drags — this card does not steal those.
-                playheadNeedle(x: needleX, height: geo.size.height, view: view)
+                PlayheadNeedle(clock: editor.clock, editor: editor, view: view,
+                               labelW: labelW, height: geo.size.height,
+                               isPlaying: editor.isPlaying)
             }
         }
         .padding(10)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Frame.hairline))
-        .onAppear {
-            if editor.currentTime > editor.trimStart + 0.05 {
-                editor.seek(to: editor.trimStart)
-            }
-        }
         .contextMenu {
             Button("Trim start here") {
                 editor.trimStart = min(editor.currentTime, editor.trimEnd - 0.5)
@@ -120,47 +127,16 @@ struct TimelineStrip: View {
             .contentShape(Rectangle())
     }
 
-    private var playheadClock: String {
-        let t = max(0, editor.currentTime - editor.trimStart)
-        return String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60)
-    }
-
-    private func playheadNeedle(x: CGFloat, height: CGFloat,
-                                view: TimelineLayout.KeepWindow) -> some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                TimelineDiamond()
-                    .fill(Frame.accent)
-                    .frame(width: 11, height: 9)
-                Rectangle()
-                    .fill(Frame.accent)
-                    .frame(width: 2, height: max(20, height - 9))
+    /// Drag anywhere on a lane or the ruler to scrub, like CapCut: the
+    /// picture follows the pointer and lands on the exact frame on release.
+    private func scrubGesture(view: TimelineLayout.KeepWindow) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                editor.scrub(to: view.time(at: value.location.x))
             }
-            if isScrubbing {
-                Text(playheadClock)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Frame.accent, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .offset(x: 22, y: -1)
-                    .allowsHitTesting(false)
+            .onEnded { _ in
+                editor.endScrub()
             }
-        }
-        .frame(width: 20, height: height, alignment: .top)
-        .contentShape(Rectangle())
-        .offset(x: x - 10)
-        .highPriorityGesture(DragGesture(minimumDistance: 0).onChanged { value in
-            if playheadBase == nil {
-                playheadBase = editor.currentTime
-                isScrubbing = true
-            }
-            let dt = Double(value.translation.width) / Double(max(view.trackWidth, 1)) * view.viewDur
-            editor.seek(to: (playheadBase ?? 0) + dt)
-        }.onEnded { _ in
-            playheadBase = nil
-            isScrubbing = false
-        })
     }
 
     private func track<V: View>(label: String, height: CGFloat, @ViewBuilder content: () -> V) -> some View {
@@ -211,12 +187,7 @@ struct TimelineStrip: View {
         .frame(width: view.trackWidth, height: 12, alignment: .topLeading)
         .clipped()
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-            isScrubbing = true
-            editor.seek(to: view.time(at: value.location.x))
-        }.onEnded { _ in
-            isScrubbing = false
-        })
+        .gesture(scrubGesture(view: view))
     }
 
     private func filmstrip(view: TimelineLayout.KeepWindow) -> some View {
@@ -242,9 +213,7 @@ struct TimelineStrip: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Frame.hairline))
         .contentShape(Rectangle())
-        .onTapGesture(coordinateSpace: .local) { point in
-            editor.seek(to: view.time(at: point.x))
-        }
+        .gesture(scrubGesture(view: view))
     }
 
     private func trimHandle(view: TimelineLayout.KeepWindow,
@@ -259,21 +228,28 @@ struct TimelineStrip: View {
             .highPriorityGesture(DragGesture(minimumDistance: 1).onChanged { value in
                 if trimDragPPS == nil { trimDragPPS = view.pps }
                 let dx = Double(value.translation.width) / Double(trimDragPPS ?? view.pps)
+                // Show the frame under the handle while trimming.
                 switch edge {
                 case .start:
                     if trimStartBase == nil { trimStartBase = editor.trimStart }
                     editor.trimStart = min(max(0, (trimStartBase ?? 0) + dx), editor.trimEnd - 0.5)
+                    editor.scrub(to: editor.trimStart)
                 case .end:
                     if trimEndBase == nil { trimEndBase = editor.trimEnd }
                     editor.trimEnd = max(min(editor.duration, (trimEndBase ?? editor.duration) + dx),
                                          editor.trimStart + 0.5)
+                    editor.scrub(to: editor.trimEnd)
                 }
             }.onEnded { _ in
                 trimStartBase = nil
                 trimEndBase = nil
                 trimDragPPS = nil
                 editor.applyTrimToPlayback()
+                editor.endScrub()
             })
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
     }
 
     private func cameraLane(view: TimelineLayout.KeepWindow) -> some View {
@@ -318,9 +294,8 @@ struct TimelineStrip: View {
             }
         }
         .frame(width: view.trackWidth, height: 32)
-        .onTapGesture(coordinateSpace: .local) { point in
-            editor.seek(to: view.time(at: point.x))
-        }
+        .contentShape(Rectangle())
+        .gesture(scrubGesture(view: view))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -354,17 +329,12 @@ struct TimelineStrip: View {
         }
         .frame(width: view.trackWidth, height: 28)
         .clipped()
-        .onTapGesture(coordinateSpace: .local) { point in
-            editor.seek(to: view.time(at: point.x))
-        }
+        .contentShape(Rectangle())
+        .gesture(scrubGesture(view: view))
     }
 
     private func zoomLane(view: TimelineLayout.KeepWindow) -> some View {
-        let hoverTime = hoverZoomX.map { view.time(at: $0) }
-        let hoverOverChip = hoverTime.map { t in
-            editor.zooms.contains { ZoomSnap.covers(start: $0.start, duration: $0.duration, time: t) }
-        } ?? false
-        return ZStack(alignment: .leading) {
+        ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.black.opacity(0.04))
                 .frame(width: view.trackWidth, height: 28)
@@ -373,22 +343,9 @@ struct TimelineStrip: View {
                     zoomChip(zoom, view: view)
                 }
             }
-            if !isEditingZoom, !hoverOverChip, let hx = hoverZoomX {
-                Button {
-                    let snapped = ZoomSnap.snap(
-                        view.time(at: hx),
-                        playhead: editor.currentTime,
-                        timeline: editor.duration)
-                    editor.addZoom(at: snapped)
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Frame.accent)
-                        .background(Circle().fill(Color.white))
-                }
-                .buttonStyle(.plain)
-                .help("Add a zoom here")
-                .position(x: hx, y: 14)
+            if !isEditingZoom {
+                ZoomAddButton(hover: zoomHover, editor: editor, view: view,
+                              zooms: editor.zooms)
             }
         }
         .frame(width: view.trackWidth, height: 28)
@@ -397,9 +354,9 @@ struct TimelineStrip: View {
         .onContinuousHover { phase in
             switch phase {
             case .active(let p):
-                hoverZoomX = min(max(p.x, 0), view.trackWidth)
+                zoomHover.x = min(max(p.x, 0), view.trackWidth)
             case .ended:
-                hoverZoomX = nil
+                zoomHover.x = nil
             }
         }
     }
@@ -518,6 +475,135 @@ struct TimelineStrip: View {
             z.duration = min(max(snappedEnd - z.start, ZoomTiming.minDuration), editor.duration - z.start)
         }
         return z
+    }
+}
+
+/// Pointer position over the tracks, shared with the small views that draw it.
+@MainActor
+final class TimelineHover: ObservableObject {
+    @Published var x: CGFloat?
+}
+
+/// The playhead. Only this view watches the clock, and while playing it
+/// reads the player every display frame so the needle glides instead of
+/// stepping at the 24 fps clock rate.
+private struct PlayheadNeedle: View {
+    @ObservedObject var clock: PlayheadClock
+    let editor: EditorState
+    let view: TimelineLayout.KeepWindow
+    let labelW: CGFloat
+    let height: CGFloat
+    let isPlaying: Bool
+    @State private var base: Double?
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying)) { _ in
+            let t = isPlaying ? editor.livePlayheadTime() : clock.time
+            needle(time: t)
+                .offset(x: TimelineLayout.playheadX(time: t, window: view, labelWidth: labelW) - 10)
+        }
+    }
+
+    private func needle(time: Double) -> some View {
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                TimelineDiamond()
+                    .fill(Frame.accent)
+                    .frame(width: 11, height: 9)
+                Rectangle()
+                    .fill(Frame.accent)
+                    .frame(width: 2, height: max(20, height - 9))
+            }
+            if clock.scrubbing {
+                Text(TimecodeText.clock(max(0, time - editor.trimStart)))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Frame.accent, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .fixedSize()
+                    .offset(x: 30, y: -1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(width: 20, height: height, alignment: .top)
+        .contentShape(Rectangle())
+        .highPriorityGesture(DragGesture(minimumDistance: 0).onChanged { value in
+            if base == nil { base = editor.currentTime }
+            let dt = Double(value.translation.width) / Double(max(view.trackWidth, 1)) * view.viewDur
+            editor.scrub(to: (base ?? 0) + dt)
+        }.onEnded { _ in
+            base = nil
+            editor.endScrub()
+        })
+        .onHover { inside in
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+    }
+}
+
+/// Faint skim line under the pointer with its time, so you can see where a
+/// click will land before you click.
+private struct HoverGuide: View {
+    @ObservedObject var hover: TimelineHover
+    @ObservedObject var clock: PlayheadClock
+    let view: TimelineLayout.KeepWindow
+    let trimStart: Double
+    let labelW: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        if let x = hover.x, !clock.scrubbing {
+            let t = view.time(at: x)
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.28))
+                    .frame(width: 1, height: max(20, height - 14))
+                    .offset(y: 14)
+                Text(TimecodeText.clock(max(0, t - trimStart)))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Frame.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 3))
+                    .fixedSize()
+                    .offset(x: 4)
+            }
+            .offset(x: labelW + x)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// "+" that follows the pointer along the Zoom lane.
+private struct ZoomAddButton: View {
+    @ObservedObject var hover: TimelineHover
+    let editor: EditorState
+    let view: TimelineLayout.KeepWindow
+    let zooms: [ZoomSegment]
+
+    var body: some View {
+        if let hx = hover.x {
+            let t = view.time(at: hx)
+            let overChip = zooms.contains {
+                ZoomSnap.covers(start: $0.start, duration: $0.duration, time: t)
+            }
+            if !overChip {
+                Button {
+                    let snapped = ZoomSnap.snap(t, playhead: editor.currentTime,
+                                                timeline: editor.duration)
+                    editor.addZoom(at: snapped)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Frame.accent)
+                        .background(Circle().fill(Color.white))
+                }
+                .buttonStyle(.plain)
+                .help("Add a zoom here")
+                .position(x: hx, y: 14)
+            }
+        }
     }
 }
 

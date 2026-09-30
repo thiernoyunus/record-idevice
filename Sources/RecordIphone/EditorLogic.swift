@@ -136,6 +136,32 @@ enum RulerTicks {
     }
 }
 
+/// Playhead / transport time text.
+enum TimecodeText {
+    /// "0:03.4" — tenths so a frame nudge visibly moves the clock.
+    static func clock(_ seconds: Double) -> String {
+        let tenths = max(0, Int((seconds * 10).rounded(.down)))
+        let s = tenths / 10
+        if s >= 3600 {
+            return String(format: "%d:%02d:%02d.%d", s / 3600, (s % 3600) / 60, s % 60, tenths % 10)
+        }
+        return String(format: "%d:%02d.%d", s / 60, s % 60, tenths % 10)
+    }
+}
+
+/// The timeline zoom slider moves on a log scale so the first notches are
+/// fine-grained (1×–2×) and the far end still reaches deep zoom.
+enum TimelineZoomScale {
+    static func sliderValue(zoom: Double, maxZoom: Double) -> Double {
+        guard maxZoom > 1 else { return 0 }
+        return min(max(log(max(zoom, 1)) / log(maxZoom), 0), 1)
+    }
+
+    static func zoom(sliderValue v: Double, maxZoom: Double) -> Double {
+        pow(max(maxZoom, 1), min(max(v, 0), 1))
+    }
+}
+
 /// Where phone.mov and camera.mov sit on the finished movie.
 ///
 /// `cameraOffset` is (camera start − phone start). A positive value means the
@@ -648,6 +674,15 @@ enum EditorLogicTests {
         expect("ruler labels switch to minutes after 59s",
                RulerTicks.label(8) == "8s" && RulerTicks.label(65) == "1:05"
                 && RulerTicks.label(3725) == "1:02:05")
+
+        expect("playhead clock shows tenths",
+               TimecodeText.clock(3.47) == "0:03.4" && TimecodeText.clock(65.0) == "1:05.0"
+                && TimecodeText.clock(3725.5) == "1:02:05.5" && TimecodeText.clock(-2) == "0:00.0")
+        expect("zoom slider round-trips on a log scale",
+               abs(TimelineZoomScale.zoom(sliderValue: TimelineZoomScale.sliderValue(zoom: 4, maxZoom: 24),
+                                          maxZoom: 24) - 4) < 0.0001
+                && TimelineZoomScale.sliderValue(zoom: 1, maxZoom: 24) == 0
+                && abs(TimelineZoomScale.sliderValue(zoom: 24, maxZoom: 24) - 1) < 0.0001)
 
         let report = lines.joined(separator: "\n")
         return (failed == 0, failed == 0 ? report + "\nOK editor-logic-check" : report + "\nFAIL editor-logic-check (\(failed))")

@@ -14,6 +14,8 @@ struct EditorView: View {
     @State private var cameraSelected = false
     @State private var timelineHeightBase: CGFloat?
     @State private var timelineScrollMonitor: Any?
+    @State private var keyMonitor: Any?
+    @State private var showShortcuts = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -75,12 +77,19 @@ struct EditorView: View {
                 editor.bumpTimelineZoom(delta > 0 ? 1.12 : 1 / 1.12)
                 return nil
             }
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                handleKey(event) ? nil : event
+            }
         }
         .onDisappear {
             if let timelineScrollMonitor {
                 NSEvent.removeMonitor(timelineScrollMonitor)
             }
             timelineScrollMonitor = nil
+            if let keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+            }
+            keyMonitor = nil
         }
         .confirmationDialog("Move this recording to the Trash?", isPresented: $confirmTrash) {
             Button("Move to Trash", role: .destructive) {
@@ -143,6 +152,69 @@ struct EditorView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Keyboard (editor-style shortcuts)
+
+    static let shortcuts: [(String, String)] = [
+        ("Space", "Play / pause"),
+        ("← →", "Step one frame"),
+        ("⇧← ⇧→", "Jump one second"),
+        ("↑ / Home", "Go to start"),
+        ("↓ / End", "Go to end"),
+        ("Q", "Trim start to playhead"),
+        ("W", "Trim end to playhead"),
+        ("Z", "Add zoom at playhead"),
+        ("⌫", "Delete selected zoom / scene"),
+        ("⌘=  ⌘-", "Zoom timeline in / out"),
+        ("⌘0", "Fit timeline"),
+        ("Pinch / ⌘ scroll", "Zoom timeline"),
+        ("⌘Z  ⇧⌘Z", "Undo / redo"),
+    ]
+
+    /// Returns true when the key was used. Never steals typing: text fields,
+    /// sheets and dialogs get their keys untouched.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard let window = event.window, window.isKeyWindow,
+              window.attachedSheet == nil,
+              !(window.firstResponder is NSText) else { return false }
+        guard editor.isReady, editor.exportProgress == nil else { return false }
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if mods == [.command] || mods == [.command, .shift] {
+            switch chars {
+            case "=", "+": editor.bumpTimelineZoom(1.25); return true
+            case "-", "_": editor.bumpTimelineZoom(1 / 1.25); return true
+            case "0": editor.setTimelineZoom(1); return true
+            default: return false
+            }
+        }
+        guard mods.isEmpty || mods == [.shift] else { return false }
+        let bigStep = mods == [.shift]
+        switch event.keyCode {
+        case 49: editor.togglePlay(); return true                           // space
+        case 123: editor.nudge(by: bigStep ? -1 : -EditorState.frameStep); return true  // ←
+        case 124: editor.nudge(by: bigStep ? 1 : EditorState.frameStep); return true    // →
+        case 115, 126: editor.jumpToStart(); return true                    // home, ↑
+        case 119, 125: editor.jumpToEnd(); return true                      // end, ↓
+        case 51, 117:                                                       // ⌫, ⌦
+            if editor.mode == .scenes, editor.selectedSceneID != nil {
+                editor.deleteSelectedScene(); return true
+            }
+            if editor.selectedZoomID != nil {
+                editor.deleteSelectedZoom(); return true
+            }
+            return false
+        default:
+            break
+        }
+        guard mods.isEmpty, editor.mode == .edit else { return false }
+        switch chars {
+        case "q": editor.trimStartAtPlayhead(); return true
+        case "w": editor.trimEndAtPlayhead(); return true
+        case "z": editor.addZoom(); return true
+        default: return false
+        }
     }
 
     private func pickAndExport() {
@@ -218,8 +290,7 @@ struct EditorView: View {
                     ForEach(editor.scenes) { clip in
                         sceneChip(clip, pps: pps)
                     }
-                    Rectangle().fill(Frame.accent).frame(width: 2)
-                        .offset(x: editor.currentTime * pps)
+                    ScenePlayhead(clock: editor.clock, pps: pps)
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 6).onChanged { value in
@@ -379,6 +450,7 @@ struct EditorView: View {
                 if editor.isReady {
                     DualReviewCanvas(
                         editor: editor,
+                        clock: editor.clock,
                         engine: engine,
                         cameraSelected: $cameraSelected
                     )
@@ -430,12 +502,11 @@ struct EditorView: View {
                 .background(Frame.accent, in: Circle())
         }
         .buttonStyle(.plain)
-        .help(editor.isPlaying ? "Pause" : "Play")
-        .keyboardShortcut(.space, modifiers: [])
+        .help(editor.isPlaying ? "Pause (Space)" : "Play (Space)")
     }
 
     private var jumpToStartButton: some View {
-        Button { editor.seek(to: editor.trimStart) } label: {
+        Button { editor.jumpToStart() } label: {
             Image(systemName: "backward.end.fill")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Frame.label)
@@ -447,12 +518,8 @@ struct EditorView: View {
     }
 
     private var transportClock: some View {
-        Text(String(format: "%@ / %@",
-                    clock(max(0, editor.currentTime - editor.trimStart)),
-                    clock(max(0, editor.trimEnd - editor.trimStart))))
-            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-            .foregroundStyle(Frame.label)
-            .frame(minWidth: 96, alignment: .leading)
+        TransportClock(clock: editor.clock, trimStart: editor.trimStart,
+                       trimEnd: editor.trimEnd)
     }
 
     private func deckIcon(_ system: String, help: String, action: @escaping () -> Void) -> some View {
@@ -475,11 +542,30 @@ struct EditorView: View {
                      help: editor.timelineHidden ? "Show timeline" : "Hide timeline") {
                 editor.timelineHidden.toggle()
             }
-            deckIcon("minus.magnifyingglass", help: "Zoom out") {
-                editor.bumpTimelineZoom(1 / 1.15)
+            deckIcon("keyboard", help: "Keyboard shortcuts") {
+                showShortcuts.toggle()
             }
-            deckIcon("plus.magnifyingglass", help: "Zoom in — or hold ⌘ and scroll") {
-                editor.bumpTimelineZoom(1.15)
+            .popover(isPresented: $showShortcuts, arrowEdge: .top) {
+                shortcutsCard
+            }
+            deckIcon("arrow.left.and.right.square", help: "Fit timeline (⌘0)") {
+                editor.setTimelineZoom(1)
+            }
+            deckIcon("minus.magnifyingglass", help: "Zoom out (⌘-)") {
+                editor.bumpTimelineZoom(1 / 1.25)
+            }
+            Slider(value: Binding(
+                get: { TimelineZoomScale.sliderValue(zoom: editor.timelineZoom,
+                                                     maxZoom: EditorState.maxTimelineZoom) },
+                set: { editor.setTimelineZoom(TimelineZoomScale.zoom(
+                    sliderValue: $0, maxZoom: EditorState.maxTimelineZoom)) }
+            ), in: 0...1)
+            .controlSize(.mini)
+            .tint(Frame.accent)
+            .frame(width: 96)
+            .help("Timeline zoom — or pinch / hold ⌘ and scroll")
+            deckIcon("plus.magnifyingglass", help: "Zoom in (⌘=)") {
+                editor.bumpTimelineZoom(1.25)
             }
             Button { editor.addZoom() } label: {
                 Label("Add Zoom", systemImage: "plus.magnifyingglass")
@@ -515,14 +601,8 @@ struct EditorView: View {
             }
             .frame(height: 48)
             if !editor.timelineHidden {
-                GeometryReader { geo in
-                    let contentW = max(geo.size.width, geo.size.width * editor.timelineZoom)
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        TimelineStrip(editor: editor)
-                            .frame(width: contentW, height: editor.timelineHeight)
-                    }
-                }
-                .frame(height: editor.timelineHeight)
+                TimelineScroller(editor: editor)
+                    .frame(height: editor.timelineHeight)
             }
             editorChromeBar
         }
@@ -672,9 +752,21 @@ struct EditorView: View {
         chromeMenu(title: title, value: value, content: content, trailing: { EmptyView() })
     }
 
-    private func clock(_ s: Double) -> String {
-        let t = max(0, s)
-        return String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60)
+    private var shortcutsCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Keyboard shortcuts")
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.bottom, 2)
+            ForEach(Self.shortcuts, id: \.0) { item in
+                HStack {
+                    Text(item.0)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .frame(width: 120, alignment: .leading)
+                    Text(item.1).font(.system(size: 12))
+                }
+            }
+        }
+        .padding(14)
     }
 
     private func exportOverlay(_ progress: Double) -> some View {
@@ -712,6 +804,8 @@ private extension Array {
 /// Avoids AVPlayer's custom compositor, which freezes the Mac.
 private struct DualReviewCanvas: View {
     @ObservedObject var editor: EditorState
+    /// The stage animates zooms / scene cuts, so it redraws on every tick.
+    @ObservedObject var clock: PlayheadClock
     @ObservedObject var engine: CaptureEngine
     @Binding var cameraSelected: Bool
     @State private var resizeStart: CGFloat?
@@ -973,5 +1067,139 @@ final class PlayerLayerNSView: NSView {
 
     var gravity: AVLayerVideoGravity = .resizeAspectFill {
         didSet { (layer as? AVPlayerLayer)?.videoGravity = gravity }
+    }
+}
+
+/// Transport time. Watches only the clock, so ticking it redraws one label.
+private struct TransportClock: View {
+    @ObservedObject var clock: PlayheadClock
+    let trimStart: Double
+    let trimEnd: Double
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(TimecodeText.clock(max(0, clock.time - trimStart)))
+                .foregroundStyle(Frame.label)
+            Text("/")
+                .foregroundStyle(Frame.tertiary)
+            Text(TimecodeText.clock(max(0, trimEnd - trimStart)))
+                .foregroundStyle(Frame.secondary)
+        }
+        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+        .monospacedDigit()
+        .frame(minWidth: 132, alignment: .leading)
+    }
+}
+
+private struct ScenePlayhead: View {
+    @ObservedObject var clock: PlayheadClock
+    let pps: CGFloat
+
+    var body: some View {
+        Rectangle().fill(Frame.accent).frame(width: 2)
+            .offset(x: clock.time * pps)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Horizontal scroller around the timeline strip, with the CapCut habits:
+/// zoom keeps the playhead where it is on screen, the view pages along
+/// with the playhead during playback, and a trackpad pinch zooms.
+private struct TimelineScroller: View {
+    @ObservedObject var editor: EditorState
+    @State private var position = ScrollPosition(edge: .leading)
+    @State private var metrics = ScrollMetrics()
+    @State private var pinchBase: Double?
+
+    /// Must match TimelineStrip's label column and padding.
+    private let labelW: CGFloat = 64
+    private let pad: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { geo in
+            let viewport = geo.size.width
+            let contentW = max(viewport, viewport * editor.timelineZoom)
+            ScrollView(.horizontal, showsIndicators: true) {
+                TimelineStrip(editor: editor)
+                    .frame(width: contentW, height: editor.timelineHeight)
+            }
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.x }) { _, x in
+                metrics.offset = x
+            }
+            .onChange(of: editor.timelineZoom) { old, new in
+                keepPlayheadPinned(oldZoom: old, newZoom: new, viewport: viewport)
+            }
+            .background {
+                PlayheadFollower(clock: editor.clock) { time in
+                    follow(time: time, viewport: viewport)
+                }
+            }
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        if pinchBase == nil { pinchBase = editor.timelineZoom }
+                        editor.setTimelineZoom((pinchBase ?? 1) * value.magnification)
+                    }
+                    .onEnded { _ in pinchBase = nil }
+            )
+            .onAppear { metrics.viewport = viewport }
+            .onChange(of: viewport) { _, w in metrics.viewport = w }
+        }
+    }
+
+    /// Content x of the playhead needle at a given zoom.
+    private func playheadX(time: Double, zoom: Double, viewport: CGFloat) -> CGFloat {
+        let contentW = max(viewport, viewport * zoom)
+        let trackW = max(contentW - pad * 2 - labelW, 1)
+        let window = TimelineLayout.keepWindow(
+            trimStart: editor.trimStart, trimEnd: editor.trimEnd,
+            duration: editor.duration, trackWidth: trackW)
+        return pad + labelW + window.x(for: time)
+    }
+
+    private func keepPlayheadPinned(oldZoom: Double, newZoom: Double, viewport: CGFloat) {
+        guard viewport > 0 else { return }
+        let t = editor.currentTime
+        let onScreen = playheadX(time: t, zoom: oldZoom, viewport: viewport) - metrics.offset
+        // If the playhead was off screen, zoom around the middle instead.
+        let anchor = (onScreen >= 0 && onScreen <= viewport) ? onScreen : viewport / 2
+        let target = playheadX(time: t, zoom: newZoom, viewport: viewport) - anchor
+        let maxOffset = max(0, viewport * newZoom - viewport)
+        let x = min(max(0, target), maxOffset)
+        metrics.offset = x
+        position.scrollTo(x: x)
+    }
+
+    private func follow(time: Double, viewport: CGFloat) {
+        guard editor.timelineZoom > 1.01, !editor.clock.scrubbing, viewport > 0 else { return }
+        let x = playheadX(time: time, zoom: editor.timelineZoom, viewport: viewport)
+        let visible = metrics.offset...(metrics.offset + viewport)
+        let margin = viewport * 0.08
+        guard x < visible.lowerBound + labelW || x > visible.upperBound - margin else { return }
+        // Page forward like CapCut: put the playhead near the left edge.
+        let maxOffset = max(0, viewport * editor.timelineZoom - viewport)
+        let target = min(max(0, x - labelW - viewport * 0.12), maxOffset)
+        metrics.offset = target
+        position.scrollTo(x: target)
+    }
+}
+
+/// Plain box: scroll offset changes every frame of a scroll and must not
+/// trigger SwiftUI updates.
+private final class ScrollMetrics {
+    var offset: CGFloat = 0
+    var viewport: CGFloat = 0
+}
+
+/// Invisible view that reports clock ticks without making its parent
+/// (the scroller) observe the clock.
+private struct PlayheadFollower: View {
+    @ObservedObject var clock: PlayheadClock
+    let onTick: (Double) -> Void
+
+    var body: some View {
+        Color.clear
+            .onChange(of: clock.time) { _, t in onTick(t) }
     }
 }
