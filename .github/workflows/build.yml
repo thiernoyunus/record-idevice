@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  swift:
+    name: Swift build + logic checks
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release
+      - name: Editor logic checks
+        run: .build/release/RecordIphone --editor-logic-check
+      - name: AirPlay edge checks
+        run: .build/release/RecordIphone --airplay-edge-test
+
+  app:
+    name: App bundle (build.sh)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AirPlay helper dependencies
+        run: brew install cmake pkg-config openssl@3 libplist
+      - name: Build app bundle
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/libplist/lib/pkgconfig
+          OPENSSL_ROOT_DIR: /opt/homebrew/opt/openssl@3
+        run: ./build.sh
+      - name: Verify bundle
+        run: |
+          test -x "dist/Record iPhone.app/Contents/MacOS/Record iPhone"
+          test -x "dist/Record iPhone.app/Contents/MacOS/airplay-helper"
+          codesign --verify --deep --strict "dist/Record iPhone.app"
+          plutil -lint "dist/Record iPhone.app/Contents/Info.plist"
