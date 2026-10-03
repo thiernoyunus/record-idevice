@@ -2,7 +2,7 @@
 
 ## UxPlay (AirPlay protocol library)
 
-Record iPhone's `airplay-helper` is built from UxPlay
+Record iDevice's `airplay-helper` is built from UxPlay
 <https://github.com/FDH2/UxPlay> and is licensed under the GNU GPL v3.
 The helper links that library and does not use GStreamer; video is decoded
 in the app with VideoToolbox.
@@ -44,10 +44,10 @@ Anyone who receives a copy of the app may obtain that complete source from
 this public repository, which is the corresponding-source location for
 every binary we ship:
 
-    https://github.com/thiernoyunus/record-iphone
+    https://github.com/thiernoyunus/record-idevice
 
 Use the git revision that built the app. Every packaged app records it in
-`Record iPhone.app/Contents/Resources/SOURCE_REVISION`, release builds refuse
+`Record iDevice.app/Contents/Resources/SOURCE_REVISION`, release builds refuse
 to run with uncommitted changes, and each public release is tagged
 (`vX.Y.Z`) at that commit. A GitHub “Source code” archive
 of that revision is an immutable copy of this tree. If you redistribute a
@@ -61,6 +61,6 @@ To fetch the pinned UxPlay tree:
 
 A packaged app copies these notices to:
 
-    Record iPhone.app/Contents/Resources/THIRD_PARTY.md
-    Record iPhone.app/Contents/Resources/LICENSE
-    Record iPhone.app/Contents/Resources/licenses/UxPlay.LICENSE
+    Record iDevice.app/Contents/Resources/THIRD_PARTY.md
+    Record iDevice.app/Contents/Resources/LICENSE
+    Record iDevice.app/Contents/Resources/licenses/UxPlay.LICENSE

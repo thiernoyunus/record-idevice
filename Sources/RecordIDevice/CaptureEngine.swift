@@ -916,7 +916,7 @@ final class CaptureEngine: NSObject, ObservableObject {
     /// Do not silently follow the Mac's default input — that jumps to AirPods
     /// whenever they connect. Remember the last pick, and skip headset mics.
     static func preferredMicrophone(from mics: [AVCaptureDevice]) -> AVCaptureDevice? {
-        let saved = UserDefaults.standard.string(forKey: "recordiphone.selectedMicID")
+        let saved = UserDefaults.standard.string(forKey: "recordidevice.selectedMicID")
         if let saved, let match = mics.first(where: { $0.uniqueID == saved }) {
             return match
         }
@@ -954,7 +954,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         guard case .idle = phase else { return }
         let already = selectedMic?.uniqueID == mic.uniqueID && cameraSessionRunning
         selectedMic = mic
-        UserDefaults.standard.set(mic.uniqueID, forKey: "recordiphone.selectedMicID")
+        UserDefaults.standard.set(mic.uniqueID, forKey: "recordidevice.selectedMicID")
         if already { return }
         Task { await ensureMicPermissionAndStart() }
     }
@@ -1222,7 +1222,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     private func beginArmingCameraOnly() {
         guard cameraEnabled else {
-            errorMessage = "Turn the Mac camera on to record without a phone."
+            errorMessage = "Turn the Mac camera on to record without an iPhone or iPad."
             return
         }
         guard cameraSessionRunning else {
@@ -1395,7 +1395,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     private func startAirPlayRecording(startPhoneImmediately: Bool = true) {
         guard airplay.isConnected else {
-            errorMessage = "Wireless mirroring isn’t live yet. On the iPhone, open Control Center → Screen Mirroring → Record iPhone."
+            errorMessage = "Wireless mirroring isn’t live yet. On your iPhone or iPad, open Control Center → Screen Mirroring → Record iDevice."
             return
         }
         let dir: URL
@@ -1685,7 +1685,7 @@ final class CaptureEngine: NSObject, ObservableObject {
                 guard let self, self.recordGeneration == generation, case .recording = self.phase else { return }
                 if !self.phoneSamples.isWriting {
                     NSLog("[record] phone sample writer restart did not stick")
-                    self.errorMessage = "The iPhone picture stopped. Keep the phone unlocked and plugged in."
+                    self.errorMessage = "The screen picture stopped. Keep your iPhone or iPad unlocked and plugged in."
                     self.beginFinishing()
                 }
             }
@@ -1697,7 +1697,7 @@ final class CaptureEngine: NSObject, ObservableObject {
             guard self.phoneSession.isRunning else {
                 DispatchQueue.main.async {
                     guard case .recording = self.phase else { return }
-                    self.errorMessage = "The iPhone picture stopped. Keep the phone unlocked and plugged in."
+                    self.errorMessage = "The screen picture stopped. Keep your iPhone or iPad unlocked and plugged in."
                     self.beginFinishing()
                 }
                 return
@@ -1710,7 +1710,7 @@ final class CaptureEngine: NSObject, ObservableObject {
                 guard let self, self.recordGeneration == generation, case .recording = self.phase else { return }
                 if !self.phoneOutput.isRecording {
                     NSLog("[record] phone writer restart did not stick")
-                    self.errorMessage = "The iPhone picture stopped. Keep the phone unlocked and plugged in."
+                    self.errorMessage = "The screen picture stopped. Keep your iPhone or iPad unlocked and plugged in."
                     self.beginFinishing()
                 }
             }
@@ -1729,7 +1729,7 @@ final class CaptureEngine: NSObject, ObservableObject {
             NSLog("[record] phone sample video died (still plugged in) — starting the next file")
             restartPhoneWriter()
         case .finishTake:
-            errorMessage = "The iPhone picture stopped. Keep the phone unlocked and plugged in, then record again."
+            errorMessage = "The screen picture stopped. Keep your iPhone or iPad unlocked and plugged in, then record again."
             beginFinishing()
         case .ignore:
             break
@@ -1928,7 +1928,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         attachFrameTapForStills()
         applyMonitorVolume()
         if editor == nil {
-            errorMessage = "Couldn't open that take. Use Library — it's in Movies/Record iPhone."
+            errorMessage = "Couldn't open that take. Use Library — it's in Movies/Record iDevice."
         }
         return false
     }
@@ -2131,7 +2131,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         if text.contains("incomplete") || text.contains("too long") || text.contains("empty") {
             return "That take didn’t finish saving, so it can’t be opened. Record again and press Stop, then wait for the editor."
         }
-        return "Couldn’t open that take. It’s still in Movies/Record iPhone if you want to try again."
+        return "Couldn’t open that take. It’s still in Movies/Record iDevice if you want to try again."
     }
 
     /// Copy camera.mov → camera.keep.mov off the main thread (90MB+ files
@@ -2333,10 +2333,20 @@ final class CaptureEngine: NSObject, ObservableObject {
     static var recordingsRoot: URL {
         FileManager.default
             .urls(for: .moviesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Record iPhone", isDirectory: true)
+            .appendingPathComponent("Record iDevice", isDirectory: true)
     }
 
-    /// Opens Movies/Record iPhone in Finder, creating it on a fresh install
+    /// Before 1.0 the app was called Record iPhone. Bring those takes along
+    /// once; if both folders already exist, leave the old one alone.
+    static func moveLegacyRecordingsFolder() {
+        let old = recordingsRoot.deletingLastPathComponent()
+            .appendingPathComponent("Record iPhone", isDirectory: true)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: recordingsRoot.path) else { return }
+        try? fm.moveItem(at: old, to: recordingsRoot)
+    }
+
+    /// Opens Movies/Record iDevice in Finder, creating it on a fresh install
     /// so the menu item never silently does nothing.
     static func revealRecordingsFolder() {
         let root = recordingsRoot
@@ -2370,7 +2380,7 @@ final class CaptureEngine: NSObject, ObservableObject {
     }
 
     /// Deletes the folder of the take being discarded — but only if it is
-    /// really a take folder inside Movies/Record iPhone.
+    /// really a take folder inside Movies/Record iDevice.
     private func discardCurrentTakeFolder() {
         guard let dir = phoneFileURL?.deletingLastPathComponent().standardizedFileURL else { return }
         let root = Self.recordingsRoot.standardizedFileURL
@@ -2450,7 +2460,7 @@ final class CaptureEngine: NSObject, ObservableObject {
             }
             guard case .idle = self.phase, self.editor == nil, !self.editorOpening else { return }
             guard phoneOK || cameraOK else {
-                self.errorMessage = "Can't find a usable phone or camera recording in that folder."
+                self.errorMessage = "Can't find a usable screen or camera recording in that folder."
                 return
             }
             if !phoneOK {
@@ -2526,7 +2536,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
         let dir = FileManager.default
             .urls(for: .picturesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Record iPhone", isDirectory: true)
+            .appendingPathComponent("Record iDevice", isDirectory: true)
         let url = dir.appendingPathComponent("Screenshot \(fmt.string(from: .now)).png")
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2642,7 +2652,7 @@ extension CaptureEngine: AVCaptureFileOutputRecordingDelegate {
                 return
             case .finishTake:
                 NSLog("[record] phone writer stopped and the device is gone — finishing")
-                self.errorMessage = "The iPhone picture stopped. Keep the phone unlocked and plugged in, then record again."
+                self.errorMessage = "The screen picture stopped. Keep your iPhone or iPad unlocked and plugged in, then record again."
                 self.beginFinishing()
                 return
             case .ignore:

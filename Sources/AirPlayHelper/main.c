@@ -1,8 +1,8 @@
 /*
- * AirPlay screen-mirroring receiver for Record iPhone.
+ * AirPlay screen-mirroring receiver for Record iDevice.
  *
  * Built on the UxPlay protocol library (GPLv3), without GStreamer.
- * Advertises this Mac as "Record iPhone" in Control Center → Screen Mirroring.
+ * Advertises this Mac as "Record iDevice" in Control Center → Screen Mirroring.
  * Decrypted H.264 (and events) are written to stdout for the Swift app.
  *
  * stdout framing (big-endian):
@@ -555,7 +555,7 @@ static void ensure_dir(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    const char *name = "Record iPhone";
+    const char *name = "Record iDevice";
     const char *key_dir = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--name") && i + 1 < argc) name = argv[++i];
@@ -576,7 +576,7 @@ int main(int argc, char **argv) {
         const char *home = getenv("HOME");
         if (!home) home = ".";
         snprintf(support, sizeof(support),
-                 "%s/Library/Application Support/Record iPhone", home);
+                 "%s/Library/Application Support/Record iDevice", home);
         ensure_dir(support);
         key_dir = support;
     }
@@ -694,7 +694,7 @@ int main(int argc, char **argv) {
 
     if (dnssd_register_raop(g_dnssd, port) != 0 ||
         dnssd_register_airplay(g_dnssd, port) != 0) {
-        emit_event_fmt("{\"type\":\"error\",\"message\":\"Could not publish Record iPhone on the network.\"}");
+        emit_event_fmt("{\"type\":\"error\",\"message\":\"Could not publish Record iDevice on the network.\"}");
         return 1;
     }
 

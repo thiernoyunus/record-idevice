@@ -7,7 +7,7 @@ import SwiftUI
 import VideoToolbox
 
 /// Bezel-style wireless path: our helper advertises this Mac as
-/// "Record iPhone" in Control Center → Screen Mirroring. The phone
+/// "Record iDevice" in Control Center → Screen Mirroring. The phone
 /// stays unlocked; the picture lands in our window, not full-screen.
 @MainActor
 final class AirPlayMirror: ObservableObject {
@@ -41,11 +41,11 @@ final class AirPlayMirror: ObservableObject {
     var overlayMessage: String? {
         switch link.link {
         case .locked:
-            return "Phone locked. Unlock it — the picture will come back."
+            return "Screen locked. Unlock it — the picture will come back."
         case .dropped:
-            return "Mirroring stopped. On the iPhone, tap Screen Mirroring → Record iPhone."
+            return "Mirroring stopped. On your iPhone or iPad, tap Screen Mirroring → Record iDevice."
         case .waiting where link.hadPicture:
-            return "Waiting for the picture again. Keep the phone unlocked."
+            return "Waiting for the picture again. Keep your iPhone or iPad unlocked."
         default:
             return nil
         }
@@ -122,7 +122,7 @@ final class AirPlayMirror: ObservableObject {
 
         let proc = Process()
         proc.executableURL = url
-        proc.arguments = ["--name", "Record iPhone", "--video-sock", path]
+        proc.arguments = ["--name", "Record iDevice", "--video-sock", path]
         let out = Pipe()
         let err = Pipe()
         proc.standardOutput = out
@@ -427,7 +427,7 @@ final class AirPlayMirror: ObservableObject {
     private func startVideoListener() -> String? {
         // Random per-run name: a fixed path let any local process predict
         // where to inject frames or race the helper's reconnect.
-        let path = NSTemporaryDirectory() + "record-iphone-airplay-\(UUID().uuidString).sock"
+        let path = NSTemporaryDirectory() + "record-idevice-airplay-\(UUID().uuidString).sock"
         var st = stat()
         if lstat(path, &st) == 0, st.st_uid == getuid() { unlink(path) }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)

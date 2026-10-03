@@ -58,7 +58,7 @@ enum SoundMode: String, CaseIterable, Identifiable, Codable {
     var subtitle: String {
         switch self {
         case .off: return "Record video only"
-        case .device: return "Media sound from your iPhone, when available"
+        case .device: return "Media sound from your iPhone or iPad, when available"
         case .mic: return "Record your voice from this Mac"
         case .both: return "Device media sound plus your voice"
         }
@@ -255,7 +255,7 @@ struct CapturePreset: Codable, Identifiable, Equatable {
 }
 
 enum PresetStore {
-    private static let key = "recordiphone.capturePresets"
+    private static let key = "recordidevice.capturePresets"
     static func load() -> [CapturePreset] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let list = try? JSONDecoder().decode([CapturePreset].self, from: data) else { return [] }

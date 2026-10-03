@@ -82,7 +82,7 @@ enum WallpaperCatalog {
             Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Wallpapers/\(file)"),
             Bundle.main.executableURL?
                 .deletingLastPathComponent()
-                .appendingPathComponent("RecordIphone_RecordIphone.bundle/Wallpapers/\(file)"),
+                .appendingPathComponent("RecordIDevice_RecordIDevice.bundle/Wallpapers/\(file)"),
         ].compactMap { $0 }
         return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }

@@ -19,9 +19,9 @@ jobs:
       - name: Build
         run: swift build -c release
       - name: Editor logic checks
-        run: .build/release/RecordIphone --editor-logic-check
+        run: .build/release/RecordIDevice --editor-logic-check
       - name: AirPlay edge checks
-        run: .build/release/RecordIphone --airplay-edge-test
+        run: .build/release/RecordIDevice --airplay-edge-test
 
   app:
     name: App bundle (build.sh)
@@ -39,16 +39,16 @@ jobs:
         run: ./build.sh
       - name: Verify bundle
         run: |
-          test -x "dist/Record iPhone.app/Contents/MacOS/Record iPhone"
-          test -x "dist/Record iPhone.app/Contents/MacOS/airplay-helper"
-          codesign --verify --deep --strict "dist/Record iPhone.app"
-          plutil -lint "dist/Record iPhone.app/Contents/Info.plist"
+          test -x "dist/Record iDevice.app/Contents/MacOS/Record iDevice"
+          test -x "dist/Record iDevice.app/Contents/MacOS/airplay-helper"
+          codesign --verify --deep --strict "dist/Record iDevice.app"
+          plutil -lint "dist/Record iDevice.app/Contents/Info.plist"
       - name: Zip app for download
         # ditto keeps the code signature and bundle structure intact.
-        run: ditto -c -k --keepParent "dist/Record iPhone.app" "dist/Record-iPhone.zip"
+        run: ditto -c -k --keepParent "dist/Record iDevice.app" "dist/Record-iDevice.zip"
       - name: Upload app
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Record-iPhone-app
-          path: dist/Record-iPhone.zip
+          name: Record-iDevice-app
+          path: dist/Record-iDevice.zip
           retention-days: 14

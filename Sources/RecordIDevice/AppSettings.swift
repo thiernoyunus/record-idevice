@@ -21,7 +21,7 @@ final class AppSettings: ObservableObject {
         var detail: String {
             switch self {
             case .ask: return "Opens the Mac save window each time. Starts in your last folder."
-            case .recordingFolder: return "Puts the movie next to phone.mov in Movies/Record iPhone."
+            case .recordingFolder: return "Puts the movie next to phone.mov in Movies/Record iDevice."
             case .customFolder: return "Always writes to the folder you choose below."
             }
         }
@@ -45,12 +45,12 @@ final class AppSettings: ObservableObject {
     }
 
     private enum Keys {
-        static let exportPlace = "recordiphone.exportPlace"
-        static let customExportPath = "recordiphone.customExportPath"
-        static let lastExportDirectory = "recordiphone.lastExportDirectory"
-        static let countdownSeconds = "recordiphone.countdownSeconds"
-        static let defaultPhoneAudio = "recordiphone.defaultPhoneAudio"
-        static let defaultMicAudio = "recordiphone.defaultMicAudio"
+        static let exportPlace = "recordidevice.exportPlace"
+        static let customExportPath = "recordidevice.customExportPath"
+        static let lastExportDirectory = "recordidevice.lastExportDirectory"
+        static let countdownSeconds = "recordidevice.countdownSeconds"
+        static let defaultPhoneAudio = "recordidevice.defaultPhoneAudio"
+        static let defaultMicAudio = "recordidevice.defaultMicAudio"
     }
 
     private init() {

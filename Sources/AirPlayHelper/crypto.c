@@ -20,7 +20,7 @@
  *===================================================================
  * modified by fduncanh 2021-2022
  *
- * Record iPhone overlay of UxPlay lib/crypto.c
+ * Record iDevice overlay of UxPlay lib/crypto.c
  * (commit a3c19cbc7fcc870d74a0960bc97817a2569b4808).
  * Local change: aes_ctr_copy for type-0x05 trailer cipher snapshots.
  */

@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "RecordIphone",
+    name: "RecordIDevice",
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "RecordIphone",
+            name: "RecordIDevice",
             resources: [.copy("Resources/Wallpapers")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
