@@ -52,6 +52,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/RecordIDevice" "$APP/Contents/MacOS/Record iDevice"
 cp ".build-airplay/airplay-helper" "$APP/Contents/MacOS/airplay-helper"
+# Sparkle (in-app updates). ditto keeps the framework's symlinks intact.
+mkdir -p "$APP/Contents/Frameworks"
+ditto ".build/release/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 if [ -d "Sources/RecordIDevice/Resources/Wallpapers" ]; then
   mkdir -p "$APP/Contents/Resources/Wallpapers"
   wallpaper_files=(
@@ -65,6 +68,8 @@ if [ -d "Sources/RecordIDevice/Resources/Wallpapers" ]; then
   cp "${wallpaper_files[@]}" "$APP/Contents/Resources/Wallpapers/"
 fi
 cp Info.plist "$APP/Contents/Info.plist"
+# Sparkle decides "newer" by CFBundleVersion; the commit count always grows.
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Contents/Info.plist"
 cp PrivacyInfo.xcprivacy "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 cp THIRD_PARTY.md "$APP/Contents/Resources/THIRD_PARTY.md"
@@ -81,9 +86,21 @@ git rev-parse HEAD > "$APP/Contents/Resources/SOURCE_REVISION"
 IDENTITY="${CODESIGN_IDENTITY:--}"
 TIMESTAMP=--timestamp=none
 [ "$IDENTITY" != "-" ] && TIMESTAMP=--timestamp
-codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
+# Hardened runtime only for Developer ID builds: with ad-hoc signing it
+# refuses to load Sparkle.framework (no shared Team ID).
+RUNTIME=()
+[ "$IDENTITY" != "-" ] && RUNTIME=(--options runtime)
+codesign --force --sign "$IDENTITY" $RUNTIME $TIMESTAMP \
   "$APP/Contents/MacOS/airplay-helper"
-codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
+# Sign Sparkle inside-out (its docs say not to use --deep).
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --sign "$IDENTITY" $RUNTIME $TIMESTAMP \
+  "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+codesign --force --sign "$IDENTITY" $RUNTIME $TIMESTAMP --preserve-metadata=entitlements \
+  "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+codesign --force --sign "$IDENTITY" $RUNTIME $TIMESTAMP \
+  "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"
+codesign --force --sign "$IDENTITY" $RUNTIME $TIMESTAMP \
   --entitlements RecordIDevice.entitlements \
   "$APP"
 echo "Built: $APP"

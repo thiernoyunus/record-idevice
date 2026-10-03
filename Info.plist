@@ -30,6 +30,12 @@
     <string>Your voice is recorded with your iPhone or iPad screen so the finished video has narration.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>This Mac can appear in Control Center → Screen Mirroring so you can send your iPhone or iPad picture over Wi‑Fi.</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/thiernoyunus/record-idevice/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>+mlhmRK9iYp0ArXLce8UYgXTGem6+zveI+zl8husv6w=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
     <key>NSBonjourServices</key>
     <array>
         <string>_airplay._tcp</string>

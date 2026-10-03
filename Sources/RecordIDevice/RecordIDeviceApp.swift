@@ -2,6 +2,7 @@ import SwiftUI
 import CoreMedia
 import AVFoundation
 import AppKit
+import Sparkle
 
 enum LaunchIntent {
     static var openDir: URL?
@@ -12,10 +13,17 @@ enum LaunchIntent {
 struct RecordIDeviceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var engine = CaptureEngine()
+    /// Sparkle: checks the GitHub release feed daily and on "Check for Updates…".
+    private let updater: SPUStandardUpdaterController?
 
     init() {
         CaptureEngine.moveLegacyRecordingsFolder()
         runHeadlessModeIfRequested()
+        // Headless modes exit above. A bare `swift build` binary has no
+        // Info.plist feed, so only the packaged .app checks for updates.
+        updater = Bundle.main.bundleURL.pathExtension == "app"
+            ? SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+            : nil
     }
 
     var body: some Scene {
@@ -49,6 +57,10 @@ struct RecordIDeviceApp: App {
             SettingsView()
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater?.checkForUpdates(nil) }
+                    .disabled(updater == nil)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Open Recording…") { engine.chooseAndOpenFolder() }
                     .keyboardShortcut("o")
