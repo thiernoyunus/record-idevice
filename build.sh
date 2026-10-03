@@ -2,6 +2,9 @@
 # Builds the Swift package and assembles a runnable, ad-hoc-signed .app bundle.
 set -e
 cd "$(dirname "$0")"
+# Use the selected Xcode's macOS SDK. A stale Command Line Tools SDK breaks
+# the C build of the AirPlay helper.
+export SDKROOT="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   [ -n "${CODESIGN_IDENTITY:-}" ] || { echo "error: NOTARY_PROFILE needs CODESIGN_IDENTITY" >&2; exit 1; }
