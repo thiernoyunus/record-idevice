@@ -93,13 +93,21 @@ final class CaptureEngine: NSObject, ObservableObject {
         /// "Today at 2:03 PM" style instead.
         var displayName: String {
             let parser = DateFormatter()
+            parser.locale = Locale(identifier: "en_US_POSIX")
             parser.dateFormat = "yyyy-MM-dd HH.mm.ss"
-            guard let d = parser.date(from: name) else { return name }
+            // Same-second takes get a " (2)" suffix — keep it visible.
+            var stamp = name
+            var suffix = ""
+            if let open = name.range(of: " (", options: .backwards), name.hasSuffix(")") {
+                stamp = String(name[..<open.lowerBound])
+                suffix = String(name[open.lowerBound...])
+            }
+            guard let d = parser.date(from: stamp) else { return name }
             let cal = Calendar.current
             let time = d.formatted(date: .omitted, time: .shortened)
-            if cal.isDateInToday(d) { return "Today at \(time)" }
-            if cal.isDateInYesterday(d) { return "Yesterday at \(time)" }
-            return d.formatted(date: .abbreviated, time: .shortened)
+            if cal.isDateInToday(d) { return "Today at \(time)\(suffix)" }
+            if cal.isDateInYesterday(d) { return "Yesterday at \(time)\(suffix)" }
+            return d.formatted(date: .abbreviated, time: .shortened) + suffix
         }
     }
 
@@ -107,6 +115,9 @@ final class CaptureEngine: NSObject, ObservableObject {
     @Published var selectedPhone: AVCaptureDevice?
     @Published var phoneReady = false
     @Published var phase: Phase = .idle
+    /// When Record (or the countdown's end) asked for the take to start.
+    /// Writers may already be running in `.arming`, before `.recording`.
+    private(set) var recordPressedAt: Date?
     @Published var editor: EditorState?
     @Published var errorMessage: String?
     @Published var recentProjects: [RecentProject] = []
@@ -1108,6 +1119,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     func startRecording() {
         showHome = false
+        recordPressedAt = .now
         if case .arming = phase {
             finishArmingPhone()
             return
@@ -1124,6 +1136,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     func startCameraOnly() {
         showHome = false
+        recordPressedAt = .now
         guard case .idle = phase, editor == nil else { return }
         if connectionKind == .wireless { airplay.stop() }
         selectedPhone = nil
@@ -1168,13 +1181,9 @@ final class CaptureEngine: NSObject, ObservableObject {
             }
         }
 
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let dir = FileManager.default
-            .urls(for: .moviesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Record iPhone/\(fmt.string(from: .now))", isDirectory: true)
+        let dir: URL
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            dir = try Self.makeTakeDirectory()
         } catch {
             errorMessage = "Couldn't create the recording folder: \(error.localizedDescription)"
             return
@@ -1220,13 +1229,9 @@ final class CaptureEngine: NSObject, ObservableObject {
             errorMessage = "Camera isn't ready. Check camera permissions in System Settings."
             return
         }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let dir = FileManager.default
-            .urls(for: .moviesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Record iPhone/\(fmt.string(from: .now))", isDirectory: true)
+        let dir: URL
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            dir = try Self.makeTakeDirectory()
         } catch {
             errorMessage = "Couldn't create the recording folder: \(error.localizedDescription)"
             return
@@ -1393,13 +1398,9 @@ final class CaptureEngine: NSObject, ObservableObject {
             errorMessage = "Wireless mirroring isn’t live yet. On the iPhone, open Control Center → Screen Mirroring → Record iPhone."
             return
         }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let dir = FileManager.default
-            .urls(for: .moviesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Record iPhone/\(fmt.string(from: .now))", isDirectory: true)
+        let dir: URL
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            dir = try Self.makeTakeDirectory()
         } catch {
             errorMessage = "Couldn't create the recording folder: \(error.localizedDescription)"
             return
@@ -1772,9 +1773,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         discardedLastTake = true
         abortRecording(reason: "")
         errorMessage = nil
-        if let dir = phoneFileURL?.deletingLastPathComponent() {
-            try? FileManager.default.removeItem(at: dir)
-        }
+        discardCurrentTakeFolder()
     }
 
     func restartRecording() {
@@ -1782,9 +1781,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         let wasReady = canRecord
         abortRecording(reason: "")
         errorMessage = nil
-        if let dir = phoneFileURL?.deletingLastPathComponent() {
-            try? FileManager.default.removeItem(at: dir)
-        }
+        discardCurrentTakeFolder()
         guard wasReady else { return }
         DispatchQueue.main.async { [weak self] in
             self?.startRecording()
@@ -1980,10 +1977,10 @@ final class CaptureEngine: NSObject, ObservableObject {
     /// Writes a brand-new take the same way Stop does, then opens review.
     /// Used by `--simulate-stop` so we can test the hang without a phone.
     func simulateStopAndOpen() async {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let dir = Self.recordingsRoot.appendingPathComponent(fmt.string(from: .now), isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard let dir = try? Self.makeTakeDirectory() else {
+            errorMessage = "Simulate stop failed: couldn't create the recording folder."
+            return
+        }
         let phone = dir.appendingPathComponent("phone.mov")
         do {
             try await writeFreshRecording(to: phone, seconds: 2)
@@ -1997,6 +1994,20 @@ final class CaptureEngine: NSObject, ObservableObject {
         finishedURLs = [phone]
         expectedFinishes = 1
         presentEditor(phone: phone, camera: phone, offset: .zero)
+    }
+
+    /// File → Open…: pick any take folder (older than the Home list, or
+    /// copied from another Mac).
+    func chooseAndOpenFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a recording folder (it contains phone.mov or camera.mov)."
+        panel.directoryURL = Self.recordingsRoot
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        openFolder(dir)
     }
 
     func openFolder(_ dir: URL) {
@@ -2325,6 +2336,51 @@ final class CaptureEngine: NSObject, ObservableObject {
             .appendingPathComponent("Record iPhone", isDirectory: true)
     }
 
+    /// Opens Movies/Record iPhone in Finder, creating it on a fresh install
+    /// so the menu item never silently does nothing.
+    static func revealRecordingsFolder() {
+        let root = recordingsRoot
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(root)
+    }
+
+    /// Every take folder handed out this session. Restart deletes the old
+    /// folder, but AirPlay may still be flushing into it, so its name must
+    /// never be handed out again.
+    private static var issuedTakeDirs = Set<String>()
+
+    /// A new, empty folder for one take. Two takes in the same second (fast
+    /// Restart) must never share a folder — a late finish from the old
+    /// writer would otherwise land in the new take.
+    static func makeTakeDirectory(now: Date = .now) throws -> URL {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let base = fmt.string(from: now)
+        let root = recordingsRoot
+        var dir = root.appendingPathComponent(base, isDirectory: true)
+        var n = 2
+        while FileManager.default.fileExists(atPath: dir.path) || issuedTakeDirs.contains(dir.path) {
+            dir = root.appendingPathComponent("\(base) (\(n))", isDirectory: true)
+            n += 1
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        issuedTakeDirs.insert(dir.path)
+        return dir
+    }
+
+    /// Deletes the folder of the take being discarded — but only if it is
+    /// really a take folder inside Movies/Record iPhone.
+    private func discardCurrentTakeFolder() {
+        guard let dir = phoneFileURL?.deletingLastPathComponent().standardizedFileURL else { return }
+        let root = Self.recordingsRoot.standardizedFileURL
+        guard dir.deletingLastPathComponent().path == root.path, dir.path != root.path else {
+            NSLog("[record] refusing to delete %@ — not a take folder", dir.path)
+            return
+        }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     func refreshRecentProjects() {
         let root = Self.recordingsRoot
         guard let dirs = try? FileManager.default.contentsOfDirectory(
@@ -2352,7 +2408,8 @@ final class CaptureEngine: NSObject, ObservableObject {
             items.append(RecentProject(id: dir, name: dir.lastPathComponent,
                                        date: date, hasExport: hasExport))
         }
-        recentProjects = items.sorted { $0.date > $1.date }.prefix(16).map { $0 }
+        // Home lists every take; menus trim to the newest few themselves.
+        recentProjects = items.sorted { $0.date > $1.date }
     }
 
     private func writeTakeIntent(in dir: URL) {

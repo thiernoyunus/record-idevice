@@ -3,6 +3,21 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Darwin
 
+/// Thread-safe one-way flag shared between a timer and the awaiting task.
+private final class OnceFlagBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func mark() {
+        lock.lock(); done = true; lock.unlock()
+    }
+
+    var isSet: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return done
+    }
+}
+
 /// AVFoundation confines these three objects to one serial queue, but its
 /// legacy Objective-C types do not declare that fact to Swift's checker.
 private final class AudioMixIO: @unchecked Sendable {
@@ -537,7 +552,9 @@ enum Exporter {
                 break
             }
         }
-        if !hadAnyAudio, await joinedPhoneAudioURL(in: takeDir) != nil {
+        // Count the parts themselves: if joining them fails we still want the
+        // audio-error guard below, not a silent export.
+        if !hadAnyAudio, !PhoneAudioSegments.urls(in: takeDir).isEmpty {
             hadAnyAudio = true
         }
         if hadAnyAudio {
@@ -1222,6 +1239,12 @@ enum Exporter {
 
         let queue = DispatchQueue(label: "audio.mix")
         let io = AudioMixIO(reader: reader, output: mixOut, input: input)
+        // Stall guard. Mixing runs far faster than real time, so allow a
+        // generous slice of the take's length — a flat 3 minutes silently
+        // cut the sound off on long recordings.
+        let mixSeconds = (try? await comp.load(.duration).seconds) ?? 0
+        let stallLimit = max(180, mixSeconds.isFinite ? mixSeconds * 0.5 : 0)
+        let timedOut = OnceFlagBox()
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             let lock = NSLock()
             var resumed = false
@@ -1256,8 +1279,9 @@ enum Exporter {
                     }
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 180) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + stallLimit) {
                 if io.reader.status == .reading {
+                    timedOut.mark()
                     io.input.markAsFinished()
                     io.reader.cancelReading()
                 }
@@ -1266,6 +1290,11 @@ enum Exporter {
         }
         await writer.finishWriting()
         reader.cancelReading()
+        if timedOut.isSet {
+            NSLog("[export] audio mix stalled after %.0fs — refusing a cut-off soundtrack", stallLimit)
+            try? FileManager.default.removeItem(at: output)
+            return nil
+        }
         if writer.status != .completed || reader.status == .failed {
             NSLog("[export] audio mix failed: %@", writer.error?.localizedDescription ?? "unknown")
             try? FileManager.default.removeItem(at: output)

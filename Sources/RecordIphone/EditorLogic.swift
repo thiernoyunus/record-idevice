@@ -115,6 +115,53 @@ enum TimelineLayout {
     }
 }
 
+/// Ruler labels on the editor timeline.
+enum RulerTicks {
+    /// Keep labels at least this far apart so long takes stay readable.
+    static let minSpacing: Double = 56
+
+    /// Seconds between labels: the smallest "nice" step that fits.
+    static func step(viewDuration: Double, trackWidth: CGFloat) -> Double {
+        let steps: [Double] = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+        let pps = Double(max(trackWidth, 1)) / max(viewDuration, 0.1)
+        return steps.first { $0 * pps >= minSpacing } ?? 3600
+    }
+
+    /// "8s" under a minute, then "1:05", then "1:02:05".
+    static func label(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return String(format: "%d:%02d", s / 60, s % 60) }
+        return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+    }
+}
+
+/// Playhead / transport time text.
+enum TimecodeText {
+    /// "0:03.4" — tenths so a frame nudge visibly moves the clock.
+    static func clock(_ seconds: Double) -> String {
+        let tenths = max(0, Int((seconds * 10).rounded(.down)))
+        let s = tenths / 10
+        if s >= 3600 {
+            return String(format: "%d:%02d:%02d.%d", s / 3600, (s % 3600) / 60, s % 60, tenths % 10)
+        }
+        return String(format: "%d:%02d.%d", s / 60, s % 60, tenths % 10)
+    }
+}
+
+/// The timeline zoom slider moves on a log scale so the first notches are
+/// fine-grained (1×–2×) and the far end still reaches deep zoom.
+enum TimelineZoomScale {
+    static func sliderValue(zoom: Double, maxZoom: Double) -> Double {
+        guard maxZoom > 1 else { return 0 }
+        return min(max(log(max(zoom, 1)) / log(maxZoom), 0), 1)
+    }
+
+    static func zoom(sliderValue v: Double, maxZoom: Double) -> Double {
+        pow(max(maxZoom, 1), min(max(v, 0), 1))
+    }
+}
+
 /// Where phone.mov and camera.mov sit on the finished movie.
 ///
 /// `cameraOffset` is (camera start − phone start). A positive value means the
@@ -617,6 +664,25 @@ enum EditorLogicTests {
                abs(AudioJoinPolicy.nextStart(current: 1.0, duration: 10, skip: 0.5) - 10.5) < 0.001)
         expect("turning the camera on also records your voice",
                SoundPolicy.modeWhenTurningCameraOn(current: .device) == .both)
+
+        expect("a short take keeps a 2s ruler",
+               RulerTicks.step(viewDuration: 30, trackWidth: 1000) == 2)
+        expect("a 10 minute take does not crowd the ruler",
+               RulerTicks.step(viewDuration: 600, trackWidth: 1000) * (1000 / 600) >= RulerTicks.minSpacing)
+        expect("an hour-long take still gets a ruler step",
+               RulerTicks.step(viewDuration: 3600, trackWidth: 800) >= 300)
+        expect("ruler labels switch to minutes after 59s",
+               RulerTicks.label(8) == "8s" && RulerTicks.label(65) == "1:05"
+                && RulerTicks.label(3725) == "1:02:05")
+
+        expect("playhead clock shows tenths",
+               TimecodeText.clock(3.47) == "0:03.4" && TimecodeText.clock(65.0) == "1:05.0"
+                && TimecodeText.clock(3725.5) == "1:02:05.5" && TimecodeText.clock(-2) == "0:00.0")
+        expect("zoom slider round-trips on a log scale",
+               abs(TimelineZoomScale.zoom(sliderValue: TimelineZoomScale.sliderValue(zoom: 4, maxZoom: 24),
+                                          maxZoom: 24) - 4) < 0.0001
+                && TimelineZoomScale.sliderValue(zoom: 1, maxZoom: 24) == 0
+                && abs(TimelineZoomScale.sliderValue(zoom: 24, maxZoom: 24) - 1) < 0.0001)
 
         let report = lines.joined(separator: "\n")
         return (failed == 0, failed == 0 ? report + "\nOK editor-logic-check" : report + "\nFAIL editor-logic-check (\(failed))")

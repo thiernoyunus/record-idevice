@@ -128,7 +128,7 @@ struct SettingsView: View {
                 }
 
                 Button("Show recordings folder") {
-                    NSWorkspace.shared.open(CaptureEngine.recordingsRoot)
+                    CaptureEngine.revealRecordingsFolder()
                 }
             }
 

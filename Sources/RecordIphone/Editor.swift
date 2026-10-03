@@ -42,6 +42,49 @@ final class WorkerOutput: @unchecked Sendable {
     }
 }
 
+/// The playhead lives on its own object. It ticks 24×/sec while playing and
+/// on every scrub event; keeping it off `EditorState` means only the needle,
+/// the clock text and the stage redraw — not the filmstrip, waveforms,
+/// zoom chips and side panels.
+@MainActor
+final class PlayheadClock: ObservableObject {
+    @Published var time: Double = 0
+    /// True while a finger / pointer is dragging the playhead.
+    @Published var scrubbing = false
+}
+
+/// "Chase" seeking (Apple QA1820): at most one seek in flight per player.
+/// New targets replace the queued one instead of piling up, so the picture
+/// keeps up with a fast scrub instead of replaying every old position.
+@MainActor
+final class ChaseSeeker {
+    private let player: AVPlayer
+    private var inFlight = false
+    private var pending: (time: CMTime, tolerance: CMTime)?
+
+    init(player: AVPlayer) {
+        self.player = player
+    }
+
+    func seek(to time: CMTime, tolerance: CMTime) {
+        pending = (time, tolerance)
+        if !inFlight { next() }
+    }
+
+    private func next() {
+        guard let target = pending else { return }
+        pending = nil
+        inFlight = true
+        player.seek(to: target.time, toleranceBefore: target.tolerance,
+                    toleranceAfter: target.tolerance) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.inFlight = false
+                self?.next()
+            }
+        }
+    }
+}
+
 /// Drives the post-recording editor: a layered phone+camera preview, trim,
 /// zoom segments, thumbnails, and the final export. Edits persist to
 /// project.json next to the raw recordings, so nothing is baked in until
@@ -114,7 +157,16 @@ final class EditorState: ObservableObject {
     /// saves may write. Until then, never overwrite an existing file.
     private var projectApplied = false
     @Published var duration: Double = 1
-    @Published var currentTime: Double = 0
+    let clock = PlayheadClock()
+    /// Playhead in timeline seconds. Stored on `clock` (see PlayheadClock).
+    var currentTime: Double {
+        get { clock.time }
+        set { if clock.time != newValue { clock.time = newValue } }
+    }
+    private lazy var phoneSeeker = ChaseSeeker(player: player)
+    private lazy var cameraSeeker = ChaseSeeker(player: cameraPlayer)
+    private var resumeAfterScrub = false
+    static let frameStep = 1.0 / 30
     @Published var isPlaying = false
     @Published var trimStart: Double = 0
     @Published var trimEnd: Double = 1
@@ -196,6 +248,9 @@ final class EditorState: ObservableObject {
         ) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                // Paused or scrubbing: the playhead is whatever we set it to.
+                // Seek completions would otherwise nudge the needle back.
+                guard self.isPlaying, !self.clock.scrubbing else { return }
                 let a = ClipAlignment.startAtMic(cameraOffsetSeconds: self.cameraOffset.seconds)
                 let timeline = self.clockOnCamera ? time.seconds : (time.seconds - a.phoneSkip)
                 let seconds = min(max(timeline, 0), max(self.duration, 0.1))
@@ -250,8 +305,8 @@ final class EditorState: ObservableObject {
         let src = alignedSources(at: currentTime)
         if src.phonePlaying {
             if player.rate == 0 {
-                player.seek(to: CMTime(seconds: src.phone, preferredTimescale: 600),
-                            toleranceBefore: .zero, toleranceAfter: .zero)
+                phoneSeeker.seek(to: CMTime(seconds: src.phone, preferredTimescale: 600),
+                                 tolerance: .zero)
                 player.volume = Float(phoneMix)
                 player.isMuted = phoneMix <= 0.001
                 player.play()
@@ -326,10 +381,9 @@ final class EditorState: ObservableObject {
         duration = ClipAlignment.timelineDuration(
             phone: seconds.0, camera: seconds.1,
             cameraOffsetSeconds: cameraOffset.seconds)
-        trimEnd = duration
-        applySavedProject()
         // Phone writer often dies while the camera keeps rolling. With no
-        // mic that leftover is a frozen picture and no sound.
+        // mic that leftover is a frozen picture and no sound. Settle the
+        // final length before the saved trim / zooms / scenes are clamped.
         let useful = ClipAlignment.usefulEnd(
             phone: seconds.0, camera: seconds.1,
             cameraOffsetSeconds: cameraOffset.seconds,
@@ -337,7 +391,10 @@ final class EditorState: ObservableObject {
         if duration > useful + 0.4 {
             duration = useful
         }
+        trimEnd = duration
+        applySavedProject()
         if trimEnd > duration { trimEnd = duration }
+        if trimStart > max(0, trimEnd - 0.05) { trimStart = max(0, trimEnd - 0.5) }
         let audible = ClipAlignment.audiblePhoneLevel(
             saved: Double(phoneMix), hasMic: hasMicAudio,
             explicitSaved: phoneMixFromProject)
@@ -430,7 +487,7 @@ final class EditorState: ObservableObject {
     }
 
     private func apply(_ doc: ProjectDoc) {
-        trimStart = min(max(0, doc.trimStart), duration - 0.5)
+        trimStart = min(max(0, doc.trimStart), max(0, duration - 0.5))
         trimEnd = min(max(trimStart + 0.5, doc.trimEnd), duration)
         zooms = Self.sanitizedZooms(doc.zooms, duration: duration)
         if let bg = doc.background { engine.background = bg }
@@ -613,9 +670,13 @@ final class EditorState: ObservableObject {
 
     func togglePlay() {
         if isPlaying {
+            // Park the needle where the picture actually stopped, not on the
+            // last 24 fps clock tick, so pausing never makes it hop back.
+            let parked = livePlayheadTime()
             player.pause()
             cameraPlayer.pause()
             isPlaying = false
+            currentTime = parked
         } else {
             if currentTime >= trimEnd - 0.05 || currentTime < trimStart {
                 seek(to: trimStart)
@@ -627,15 +688,85 @@ final class EditorState: ObservableObject {
         }
     }
 
-    func seek(to seconds: Double) {
+    func seek(to seconds: Double, precise: Bool = false) {
         guard seconds.isFinite else { return }
         // Always stay inside the trim window so scrubbing matches export.
         let lo = trimStart
         let hi = max(trimStart + 0.05, trimEnd)
         let clamped = min(max(seconds, lo), hi)
         currentTime = clamped
-        let slack = CMTime(seconds: 0.04, preferredTimescale: 600)
+        let slack = precise ? CMTime.zero : CMTime(seconds: 0.04, preferredTimescale: 600)
         seekSources(to: clamped, slack: slack)
+    }
+
+    // MARK: - Scrub (CapCut-style: grab the playhead, video follows, release
+    // lands on the exact frame and resumes if it was playing)
+
+    func beginScrub() {
+        guard !clock.scrubbing else { return }
+        clock.scrubbing = true
+        resumeAfterScrub = isPlaying
+        if isPlaying {
+            player.pause()
+            cameraPlayer.pause()
+            isPlaying = false
+        }
+    }
+
+    func scrub(to seconds: Double) {
+        if !clock.scrubbing { beginScrub() }
+        seek(to: seconds)
+    }
+
+    func endScrub() {
+        guard clock.scrubbing else { return }
+        clock.scrubbing = false
+        seek(to: currentTime, precise: true)
+        if resumeAfterScrub {
+            resumeAfterScrub = false
+            togglePlay()
+        }
+    }
+
+    /// Where the playhead is right now, read straight off the playing
+    /// player so the needle can glide at display rate between clock ticks.
+    func livePlayheadTime() -> Double {
+        guard isPlaying, !clock.scrubbing else { return currentTime }
+        let master = clockOnCamera ? cameraPlayer : player
+        let t = master.currentTime().seconds
+        guard t.isFinite else { return currentTime }
+        let a = ClipAlignment.startAtMic(cameraOffsetSeconds: cameraOffset.seconds)
+        let timeline = clockOnCamera ? t : t - a.phoneSkip
+        return min(max(timeline, trimStart), max(trimStart, trimEnd))
+    }
+
+    /// Arrow keys: one frame, or a second with Shift. Pauses like CapCut.
+    func nudge(by seconds: Double) {
+        if isPlaying { togglePlay() }
+        seek(to: currentTime + seconds, precise: true)
+    }
+
+    func jumpToStart() {
+        seek(to: trimStart, precise: true)
+    }
+
+    func jumpToEnd() {
+        if isPlaying { togglePlay() }
+        seek(to: max(trimStart, trimEnd - Self.frameStep), precise: true)
+    }
+
+    /// Q — cut everything before the playhead.
+    func trimStartAtPlayhead() {
+        guard isReady, currentTime < trimEnd - 0.5 else { return }
+        trimStart = max(0, currentTime)
+        applyTrimToPlayback()
+    }
+
+    /// W — cut everything after the playhead.
+    func trimEndAtPlayhead() {
+        guard isReady, currentTime > trimStart + 0.5 else { return }
+        trimEnd = min(duration, currentTime)
+        applyTrimToPlayback()
     }
 
     /// Timeline scrub may target raw timeline positions (including outside
@@ -655,11 +786,9 @@ final class EditorState: ObservableObject {
 
     private func seekSources(to timeline: Double, slack: CMTime) {
         let src = alignedSources(at: timeline)
-        player.seek(to: CMTime(seconds: src.phone, preferredTimescale: 600),
-                    toleranceBefore: slack, toleranceAfter: slack)
+        phoneSeeker.seek(to: CMTime(seconds: src.phone, preferredTimescale: 600), tolerance: slack)
         guard hasCamera else { return }
-        cameraPlayer.seek(to: CMTime(seconds: src.camera, preferredTimescale: 600),
-                          toleranceBefore: slack, toleranceAfter: slack)
+        cameraSeeker.seek(to: CMTime(seconds: src.camera, preferredTimescale: 600), tolerance: slack)
     }
 
     func applyTrimToPlayback() {
@@ -811,6 +940,7 @@ final class EditorState: ObservableObject {
     private struct EditSnapshot: Equatable {
         var trimStart: Double, trimEnd: Double
         var zooms: [ZoomSegment]
+        var scenes: [SceneClip]
         var background: BackgroundPreset
         var showBezel: Bool
         var bubbleFraction: CGFloat
@@ -842,6 +972,7 @@ final class EditorState: ObservableObject {
 
     private var currentSnapshot: EditSnapshot {
         EditSnapshot(trimStart: trimStart, trimEnd: trimEnd, zooms: zooms,
+                     scenes: scenes,
                      background: engine.background, showBezel: engine.showBezel,
                      bubbleFraction: engine.bubbleFraction, bubbleCenter: engine.bubbleCenter,
                      canvas: engine.canvas, presenterLayout: engine.presenterLayout,
@@ -889,6 +1020,7 @@ final class EditorState: ObservableObject {
     private func apply(_ s: EditSnapshot) {
         isRestoringSnapshot = true
         trimStart = s.trimStart; trimEnd = s.trimEnd; zooms = s.zooms
+        scenes = s.scenes
         engine.background = s.background; engine.showBezel = s.showBezel
         engine.bubbleFraction = s.bubbleFraction; engine.bubbleCenter = s.bubbleCenter
         engine.canvas = s.canvas; engine.presenterLayout = s.presenterLayout
@@ -909,6 +1041,7 @@ final class EditorState: ObservableObject {
         micMix = s.micAudioLevel
         applyPlaybackVolumes()
         if !zooms.contains(where: { $0.id == selectedZoomID }) { selectedZoomID = nil }
+        if !scenes.contains(where: { $0.id == selectedSceneID }) { selectedSceneID = nil }
         applyTrimToPlayback()
         refreshPreview(immediate: true)
         isRestoringSnapshot = false
@@ -985,8 +1118,17 @@ final class EditorState: ObservableObject {
         waveform = pair.0.0
     }
 
+    static let maxTimelineZoom = 24.0
+
     func bumpTimelineZoom(_ factor: Double) {
-        timelineZoom = min(16, max(1, timelineZoom * factor))
+        setTimelineZoom(timelineZoom * factor)
+    }
+
+    func setTimelineZoom(_ zoom: Double) {
+        guard zoom.isFinite else { return }
+        let next = min(Self.maxTimelineZoom, max(1, zoom))
+        guard abs(next - timelineZoom) > 0.0001 else { return }
+        timelineZoom = next
         scheduleThumbnails()
     }
 
@@ -1222,6 +1364,12 @@ final class EditorState: ObservableObject {
                 if line.hasPrefix("progress "), let p = Double(line.dropFirst(9)) {
                     Task { @MainActor [weak self] in
                         self?.exportProgress = min(max(p, 0), 1)
+                        self?.lastExportProgressAt = .now
+                    }
+                } else if line == "preparing" {
+                    // Long takes spend a while joining / mixing audio before
+                    // the first progress tick. Keep the watchdog calm.
+                    Task { @MainActor [weak self] in
                         self?.lastExportProgressAt = .now
                     }
                 } else if line.hasPrefix("OK ") || line.hasPrefix("FAIL") {
