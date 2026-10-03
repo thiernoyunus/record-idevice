@@ -115,6 +115,9 @@ final class CaptureEngine: NSObject, ObservableObject {
     @Published var selectedPhone: AVCaptureDevice?
     @Published var phoneReady = false
     @Published var phase: Phase = .idle
+    /// When Record (or the countdown's end) asked for the take to start.
+    /// Writers may already be running in `.arming`, before `.recording`.
+    private(set) var recordPressedAt: Date?
     @Published var editor: EditorState?
     @Published var errorMessage: String?
     @Published var recentProjects: [RecentProject] = []
@@ -1116,6 +1119,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     func startRecording() {
         showHome = false
+        recordPressedAt = .now
         if case .arming = phase {
             finishArmingPhone()
             return
@@ -1132,6 +1136,7 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     func startCameraOnly() {
         showHome = false
+        recordPressedAt = .now
         guard case .idle = phase, editor == nil else { return }
         if connectionKind == .wireless { airplay.stop() }
         selectedPhone = nil
@@ -2339,6 +2344,11 @@ final class CaptureEngine: NSObject, ObservableObject {
         NSWorkspace.shared.open(root)
     }
 
+    /// Every take folder handed out this session. Restart deletes the old
+    /// folder, but AirPlay may still be flushing into it, so its name must
+    /// never be handed out again.
+    private static var issuedTakeDirs = Set<String>()
+
     /// A new, empty folder for one take. Two takes in the same second (fast
     /// Restart) must never share a folder — a late finish from the old
     /// writer would otherwise land in the new take.
@@ -2350,11 +2360,12 @@ final class CaptureEngine: NSObject, ObservableObject {
         let root = recordingsRoot
         var dir = root.appendingPathComponent(base, isDirectory: true)
         var n = 2
-        while FileManager.default.fileExists(atPath: dir.path) {
+        while FileManager.default.fileExists(atPath: dir.path) || issuedTakeDirs.contains(dir.path) {
             dir = root.appendingPathComponent("\(base) (\(n))", isDirectory: true)
             n += 1
         }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        issuedTakeDirs.insert(dir.path)
         return dir
     }
 

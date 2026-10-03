@@ -575,10 +575,15 @@ struct ContentView: View {
 
     private func requestDiscard(_ action: DiscardAction) {
         // A second or two of a false start is not worth a dialog.
-        if case .recording(let started) = engine.phase,
-           Date.now.timeIntervalSince(started) >= 5 {
-            confirmDiscard = action
-            return
+        // Count from Record, not from .recording: the mic can already be
+        // writing while the phone is still arming.
+        switch engine.phase {
+        case .arming, .recording:
+            if let pressed = engine.recordPressedAt, Date.now.timeIntervalSince(pressed) >= 5 {
+                confirmDiscard = action
+                return
+            }
+        default: break
         }
         if action == .restart { engine.restartRecording() } else { engine.cancelRecording() }
     }

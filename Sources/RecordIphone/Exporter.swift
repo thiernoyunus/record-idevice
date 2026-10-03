@@ -552,7 +552,9 @@ enum Exporter {
                 break
             }
         }
-        if !hadAnyAudio, await joinedPhoneAudioURL(in: takeDir) != nil {
+        // Count the parts themselves: if joining them fails we still want the
+        // audio-error guard below, not a silent export.
+        if !hadAnyAudio, !PhoneAudioSegments.urls(in: takeDir).isEmpty {
             hadAnyAudio = true
         }
         if hadAnyAudio {

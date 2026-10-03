@@ -479,6 +479,26 @@ private final class OnceFlag: @unchecked Sendable {
     }
 }
 
+private final class ActivityStamp: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = Date()
+    private var finished = false
+
+    /// `finished`: encoding hit 100%; writing the file out may take a while
+    /// and prints nothing, like the editor's watchdog allows.
+    func stamp(finished: Bool = false) {
+        lock.lock()
+        last = Date()
+        self.finished = self.finished || finished
+        lock.unlock()
+    }
+
+    var silentFor: TimeInterval {
+        lock.lock(); defer { lock.unlock() }
+        return finished ? 0 : Date().timeIntervalSince(last)
+    }
+}
+
 func writeFreshRecording(to url: URL, seconds: Double) async throws {
     try? FileManager.default.removeItem(at: url)
     let writer = try AVAssetWriter(url: url, fileType: .mov)
@@ -634,6 +654,7 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
     let done = DispatchSemaphore(value: 0)
     var exitCode: Int32 = 1
     let encoding = OnceFlag()
+    let activity = ActivityStamp()
 
     // Joining parts, repairing files and mixing audio print no progress.
     // On a long take that can outlast the editor's 60s silence watchdog,
@@ -642,6 +663,7 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
     DispatchQueue.global(qos: .utility).async {
         let prepLimit = Date().addingTimeInterval(20 * 60)
         while !encoding.isSet, Date() < prepLimit {
+            activity.stamp()
             print("preparing")
             Thread.sleep(forTimeInterval: 5)
         }
@@ -655,6 +677,7 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
                 phoneAudioLevel: phoneAudioLevel, micAudioLevel: micAudioLevel,
                 onProgress: { p in
                     encoding.mark()
+                    activity.stamp(finished: p >= 1)
                     print(String(format: "progress %.4f", p))
                 })
             print(String(format: "OK %@ in %.1fs", out.path, Date().timeIntervalSince(started)))
@@ -667,7 +690,14 @@ private func runHeadlessExport(phoneURL: URL, cameraURL: URL, offset: CMTime,
         done.signal()
     }
     // No overall time cap: an hour-long take legitimately encodes for many
-    // minutes. The editor kills this worker if progress goes silent.
-    done.wait()
+    // minutes. Instead, die after 2 minutes with no output at all. The
+    // editor's own 60s watchdog fires first; this catches runs with no editor
+    // (--export-test, a standalone --export-json).
+    while done.wait(timeout: .now() + 10) == .timedOut {
+        if activity.silentFor > 120 {
+            print("TIMEOUT: export made no progress for 120s")
+            exit(2)
+        }
+    }
     exit(exitCode)
 }
