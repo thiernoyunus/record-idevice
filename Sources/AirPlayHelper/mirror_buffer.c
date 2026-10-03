@@ -14,7 +14,7 @@
  *================================================================
  * modified by fduncanh 2022
  *
- * Record iPhone overlay of UxPlay lib/mirror_buffer.c
+ * Record iDevice overlay of UxPlay lib/mirror_buffer.c
  * (commit a3c19cbc7fcc870d74a0960bc97817a2569b4808).
  * Local change: snapshot/restore so a rejected trailer cannot
  * advance the shared AES-CTR stream.

@@ -357,7 +357,7 @@ final class EditorState: ObservableObject {
                     }.value) ?? playbackPhoneURL
                 }
             } catch {
-                loadFailed = "Couldn't open this recording yet. Tap Back, then open it from Library. Your files are in Movies/Record iPhone."
+                loadFailed = "Couldn't open this recording yet. Tap Back, then open it from Library. Your files are in Movies/Record iDevice."
                 NSLog("[editor] prepare playback failed: %@", error.localizedDescription)
                 return
             }

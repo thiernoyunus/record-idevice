@@ -47,10 +47,10 @@ cmake --build .build-airplay --config Release
 
 swift build -c release
 
-APP="dist/Record iPhone.app"
+APP="dist/Record iDevice.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp ".build/release/RecordIphone" "$APP/Contents/MacOS/Record iPhone"
+cp ".build/release/RecordIphone" "$APP/Contents/MacOS/Record iDevice"
 cp ".build-airplay/airplay-helper" "$APP/Contents/MacOS/airplay-helper"
 if [ -d "Sources/RecordIphone/Resources/Wallpapers" ]; then
   mkdir -p "$APP/Contents/Resources/Wallpapers"
@@ -89,7 +89,7 @@ codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
 echo "Built: $APP"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
-  ZIP="dist/Record-iPhone.zip"
+  ZIP="dist/Record-iDevice.zip"
   ditto -c -k --keepParent "$APP" "$ZIP"
   xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$APP"

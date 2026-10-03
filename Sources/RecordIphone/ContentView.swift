@@ -265,7 +265,7 @@ struct ContentView: View {
                                 Text("Last picture")
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(.white)
-                                Text("Unlock the phone and this will update")
+                                Text("Unlock your iPhone or iPad and this will update")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.white.opacity(0.88))
                             }
@@ -353,10 +353,10 @@ struct ContentView: View {
     private var reconnectingState: some View {
         VStack(spacing: 12) {
             ProgressView().controlSize(.large)
-            Text("Looking for \(engine.selectedPhone?.localizedName ?? "your iPhone")…")
+            Text("Looking for \(engine.selectedPhone?.localizedName ?? "your iPhone or iPad")…")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Frame.label)
-            Text("The cable is fine — we’re waking the picture after the last take. Unlock the phone and keep the screen on.")
+            Text("The cable is fine — we’re waking the picture after the last take. Unlock your iPhone or iPad and keep the screen on.")
                 .font(.system(size: 13))
                 .foregroundStyle(Frame.secondary)
                 .multilineTextAlignment(.center)
@@ -374,7 +374,7 @@ struct ContentView: View {
             Image(systemName: "iphone.gen3")
                 .font(.system(size: 42, weight: .light))
                 .foregroundStyle(Frame.tertiary)
-            Text("Connect your iPhone")
+            Text("Connect your iPhone or iPad")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Frame.label)
             Text("Plug in a cable, mirror over Wi‑Fi, or record just the Mac camera.")
@@ -394,7 +394,7 @@ struct ContentView: View {
                             action: { engine.startWireless() })
             }
             connectCard(title: "Record just a camera",
-                        subtitle: "Mac camera · no phone",
+                        subtitle: "Mac camera only",
                         icon: "web.camera",
                         action: { engine.startCameraOnly() })
             if !engine.recentProjects.isEmpty {
@@ -485,19 +485,19 @@ struct ContentView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Frame.label)
             VStack(alignment: .leading, spacing: 6) {
-                Text("1. On the iPhone, swipe to Control Center")
+                Text("1. On your iPhone or iPad, open Control Center")
                 Text("2. Tap Screen Mirroring")
-                Text("3. Tap Record iPhone")
+                Text("3. Tap Record iDevice")
             }
             .font(.system(size: 13))
             .foregroundStyle(Frame.secondary)
-            Text("The phone stays unlocked. The picture shows up in this window — not full-screen.")
+            Text("Your iPhone or iPad stays unlocked. The picture shows up in this window — not full-screen.")
                 .font(.system(size: 12))
                 .foregroundStyle(Frame.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
             if let pin = engine.airplay.pinCode {
-                Text("If the phone asks for a code, enter \(pin)")
+                Text("If it asks for a code, enter \(pin)")
                     .font(.system(size: 13, weight: .semibold))
             }
             Button("Cancel wireless") { engine.cancelWireless() }
@@ -755,9 +755,9 @@ struct ContentView: View {
         var bits: [String] = []
         switch engine.soundMode {
         case .off: bits.append("No sound")
-        case .device: bits.append("iPhone sound")
+        case .device: bits.append("Device sound")
         case .mic: bits.append("Mic")
-        case .both: bits.append("Mic + iPhone")
+        case .both: bits.append("Mic + device")
         }
         bits.append(engine.cameraEnabled ? "Camera on" : "No camera")
         return bits.joined(separator: " · ")
@@ -1038,7 +1038,7 @@ struct ContentView: View {
                 Text(engine.soundMode == .off
                      ? "Recording without audio\nOnly video will be recorded"
                      : (engine.monitorPhoneAudio
-                        ? "Recording with audio\nYou’ll hear the iPhone on this Mac"
+                        ? "Recording with audio\nYou’ll hear your iPhone or iPad on this Mac"
                         : "Recording with audio\nLive speaker is muted"))
                     .font(.system(size: 11))
                     .foregroundStyle(Frame.secondary)
@@ -1051,7 +1051,7 @@ struct ContentView: View {
                 Toggle("Play phone audio on this Mac", isOn: $engine.monitorPhoneAudio)
                     .font(.system(size: 12))
                     .toggleStyle(.switch)
-                    .help("Hear your iPhone through the Mac while you preview or record. Wear headphones if you also record the Mac mic.")
+                    .help("Hear your iPhone or iPad through the Mac while you preview or record. Wear headphones if you also record the Mac mic.")
                 Text("Phone sound").font(.system(size: 11, weight: .semibold)).foregroundStyle(Frame.secondary)
                 Slider(value: $engine.phoneAudioLevel, in: 0...1)
                     .tint(Frame.accent)
@@ -1241,7 +1241,7 @@ struct HomeLandingView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Record iPhone")
+                Text("Record iDevice")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Frame.label)
                 Spacer()
@@ -1271,7 +1271,7 @@ struct HomeLandingView: View {
                 }
                 .disabled(engine.editorOpening)
                 homeCard(title: "Record just a camera",
-                         subtitle: "Mac camera · no phone",
+                         subtitle: "Mac camera only",
                          icon: "web.camera") {
                     engine.startCameraOnly()
                 }
@@ -1464,7 +1464,7 @@ private struct ConnectSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Connect with a cable")
                 .font(.system(size: 20, weight: .semibold))
-            Text("Plug the iPhone into this Mac with a USB cable. Unlock it and tap Trust This Computer if asked. The screen shows up in the phone frame — not full-screen.")
+            Text("Plug your iPhone or iPad into this Mac with a USB cable. Unlock it and tap Trust This Computer if asked. The screen shows up in the device frame — not full-screen.")
                 .font(.system(size: 13))
                 .foregroundStyle(Frame.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1497,20 +1497,20 @@ private struct WirelessWaitSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Mirror without a cable")
                 .font(.system(size: 20, weight: .semibold))
-            Text("This Mac now shows up as Record iPhone in your iPhone’s Screen Mirroring list. The phone stays unlocked, and the picture lands in this app — not across the whole Mac screen.")
+            Text("This Mac now shows up as Record iDevice in the Screen Mirroring list on your iPhone or iPad. It stays unlocked, and the picture lands in this app — not across the whole Mac screen.")
                 .font(.system(size: 13))
                 .foregroundStyle(Frame.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                step(1, "On the iPhone, swipe down from the top-right for Control Center")
+                step(1, "On your iPhone or iPad, swipe down from the top-right for Control Center")
                 step(2, "Tap Screen Mirroring")
-                step(3, "Tap Record iPhone")
+                step(3, "Tap Record iDevice")
             }
             Text("If macOS asks to allow incoming connections or local network access, choose Allow.")
                 .font(.system(size: 12))
                 .foregroundStyle(Frame.tertiary)
             if let pin = engine.airplay.pinCode {
-                Text("If the phone asks for a code, type \(pin)")
+                Text("If it asks for a code, type \(pin)")
                     .font(.system(size: 14, weight: .semibold))
             }
             switch engine.airplay.status {
@@ -1521,10 +1521,10 @@ private struct WirelessWaitSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("iPhone found. Starting the picture…")
+                        Text("Found it. Starting the picture…")
                             .foregroundStyle(Frame.secondary)
                     }
-                    Text("Keep the phone unlocked and the screen on.")
+                    Text("Keep it unlocked and the screen on.")
                         .font(.system(size: 12))
                         .foregroundStyle(Frame.tertiary)
                 }
@@ -1533,7 +1533,7 @@ private struct WirelessWaitSheet: View {
             default:
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Waiting for the iPhone…")
+                    Text("Waiting for your iPhone or iPad…")
                         .foregroundStyle(Frame.secondary)
                 }
             }

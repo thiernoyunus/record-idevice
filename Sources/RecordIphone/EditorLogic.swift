@@ -25,11 +25,11 @@ enum CameraClipStatus: Equatable {
         case .hasPicture:
             return ""
         case .micOnly:
-            return "This take recorded your voice, but not a camera picture. Layout stays phone-only."
+            return "This take recorded your voice, but not a camera picture. Layout stays screen-only."
         case .wantedButMissing:
-            return "The camera was on, but that clip didn't save. The phone screen is here. Record again and leave the camera on until you press Stop."
+            return "The camera was on, but that clip didn't save. The device screen is here. Record again and leave the camera on until you press Stop."
         case .phoneOnly:
-            return "This take is phone-screen only. Turn the Mac camera on before Record if you want your face in the picture."
+            return "This take is screen-only. Turn the Mac camera on before Record if you want your face in the picture."
         }
     }
 }

@@ -263,7 +263,7 @@ struct LookControls: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Frame.secondary)
 
-            Text("iPhone sound").font(.system(size: 11, weight: .semibold)).foregroundStyle(Frame.secondary)
+            Text("Device sound").font(.system(size: 11, weight: .semibold)).foregroundStyle(Frame.secondary)
             Slider(value: phoneLevel, in: 0...1) { _ in
                 onChange()
             }

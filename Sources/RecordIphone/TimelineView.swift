@@ -33,7 +33,7 @@ struct TimelineStrip: View {
                     track(label: "Camera", height: 32) {
                         cameraLane(view: view)
                     }
-                    audioTrack(label: "iPhone",
+                    audioTrack(label: "Device",
                                muted: editor.phoneMuted,
                                onMute: { editor.togglePhoneMute() }) {
                         audioLane(samples: editor.phoneWaveform,
@@ -41,7 +41,7 @@ struct TimelineStrip: View {
                                   delay: ClipAlignment.startAtMic(
                                     cameraOffsetSeconds: editor.cameraOffset.seconds).phoneAt,
                                   span: editor.phoneAudioDuration,
-                                  empty: "No iPhone sound on this take",
+                                  empty: "No device sound on this take",
                                   view: view)
                     }
                     audioTrack(label: "Mic",
@@ -52,7 +52,7 @@ struct TimelineStrip: View {
                                   delay: ClipAlignment.startAtMic(
                                     cameraOffsetSeconds: editor.cameraOffset.seconds).cameraAt,
                                   span: editor.micAudioDuration,
-                                  empty: "No Mac mic — Sound was iPhone only",
+                                  empty: "No Mac mic — Sound was device only",
                                   view: view)
                     }
                     track(label: "Zoom", height: 28) {
@@ -695,7 +695,7 @@ struct ZoomInspector: View {
                     }
                 }
                 .frame(maxWidth: 200)
-                Text("Click the phone picture to aim")
+                Text("Click the screen picture to aim")
                     .font(.system(size: 11))
                     .foregroundStyle(Frame.tertiary)
                 Button("Remove") { editor.deleteSelectedZoom() }

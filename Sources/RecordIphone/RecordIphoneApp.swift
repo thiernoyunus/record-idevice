@@ -14,11 +14,12 @@ struct RecordIphoneApp: App {
     @StateObject private var engine = CaptureEngine()
 
     init() {
+        CaptureEngine.moveLegacyRecordingsFolder()
         runHeadlessModeIfRequested()
     }
 
     var body: some Scene {
-        WindowGroup("Record iPhone") {
+        WindowGroup("Record iDevice") {
             ContentView()
                 .environmentObject(engine)
                 .onAppear {
@@ -119,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let busy else { return .terminateNow }
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Quit Record iPhone?"
+            alert.messageText = "Quit Record iDevice?"
             alert.informativeText = busy + " If you quit now, it may be lost."
             alert.addButton(withTitle: "Don't Quit")
             alert.addButton(withTitle: "Quit Anyway")

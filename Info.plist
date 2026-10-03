@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Record iPhone</string>
+    <string>Record iDevice</string>
     <key>CFBundleDisplayName</key>
-    <string>Record iPhone</string>
+    <string>Record iDevice</string>
     <key>CFBundleExecutable</key>
-    <string>Record iPhone</string>
+    <string>Record iDevice</string>
     <key>CFBundleIdentifier</key>
-    <string>com.thierno.record-iphone</string>
+    <string>com.thierno.record-idevice</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -25,11 +25,11 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>The Mac camera is shown in a bubble next to the phone screen and can be saved into your recording.</string>
+    <string>The Mac camera is shown in a bubble next to your iPhone or iPad screen and can be saved into your recording.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Your voice is recorded with the phone screen so the finished video has narration.</string>
+    <string>Your voice is recorded with your iPhone or iPad screen so the finished video has narration.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>This Mac can appear in Control Center → Screen Mirroring so you can send the phone picture over Wi‑Fi.</string>
+    <string>This Mac can appear in Control Center → Screen Mirroring so you can send your iPhone or iPad picture over Wi‑Fi.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_airplay._tcp</string>
