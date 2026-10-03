@@ -46,8 +46,10 @@ every binary we ship:
 
     https://github.com/thiernoyunus/record-iphone
 
-Use the git revision that built the app (or a later commit on the same
-branch that still contains these overlays). A GitHub “Source code” archive
+Use the git revision that built the app. Every packaged app records it in
+`Record iPhone.app/Contents/Resources/SOURCE_REVISION`, release builds refuse
+to run with uncommitted changes, and each public release is tagged
+(`vX.Y.Z`) at that commit. A GitHub “Source code” archive
 of that revision is an immutable copy of this tree. If you redistribute a
 binary, include this notice and the pinned UxPlay SHA, and keep that
 repository (or an archive of the same revision) available to recipients.
