@@ -3,6 +3,12 @@
 set -e
 cd "$(dirname "$0")"
 
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+  [ -n "${CODESIGN_IDENTITY:-}" ] || { echo "error: NOTARY_PROFILE needs CODESIGN_IDENTITY" >&2; exit 1; }
+  # The shipped binary must match a published commit exactly.
+  [ -z "$(git status --porcelain)" ] || { echo "error: commit your changes before a release build" >&2; exit 1; }
+fi
+
 # Pinned, audited UxPlay revision. Do not follow the moving default branch.
 UXPLAY_REPO="https://github.com/FDH2/UxPlay.git"
 UXPLAY_COMMIT="a3c19cbc7fcc870d74a0960bc97817a2569b4808"
@@ -66,12 +72,27 @@ mkdir -p "$APP/Contents/Resources/licenses"
 if [ -f Vendor/UxPlay/LICENSE ]; then
   cp Vendor/UxPlay/LICENSE "$APP/Contents/Resources/licenses/UxPlay.LICENSE"
 fi
-# Ad-hoc + hardened runtime for local use. To ship: replace "-" with your
-# Developer ID Application identity, then: xcrun notarytool submit …
+cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# GPLv3: record which commit this binary was built from (see THIRD_PARTY.md).
+git rev-parse HEAD > "$APP/Contents/Resources/SOURCE_REVISION"
+
+# Local builds: ad-hoc signed. Release builds: CODESIGN_IDENTITY="Developer ID
+# Application: …" plus NOTARY_PROFILE=<name> from `xcrun notarytool store-credentials`.
 IDENTITY="${CODESIGN_IDENTITY:--}"
-codesign --force --sign "$IDENTITY" --options runtime --timestamp=none \
+TIMESTAMP=--timestamp=none
+[ "$IDENTITY" != "-" ] && TIMESTAMP=--timestamp
+codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
   "$APP/Contents/MacOS/airplay-helper"
-codesign --force --sign "$IDENTITY" --options runtime --timestamp=none \
+codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
   --entitlements RecordIphone.entitlements \
   "$APP"
 echo "Built: $APP"
+
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+  ZIP="dist/Record-iPhone.zip"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$APP"
+  rm "$ZIP" && ditto -c -k --keepParent "$APP" "$ZIP"
+  echo "Notarized: $ZIP (built from $(git rev-parse --short HEAD))"
+fi
