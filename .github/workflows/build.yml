@@ -19,9 +19,9 @@ jobs:
       - name: Build
         run: swift build -c release
       - name: Editor logic checks
-        run: .build/release/RecordIphone --editor-logic-check
+        run: .build/release/RecordIDevice --editor-logic-check
       - name: AirPlay edge checks
-        run: .build/release/RecordIphone --airplay-edge-test
+        run: .build/release/RecordIDevice --airplay-edge-test
 
   app:
     name: App bundle (build.sh)

@@ -427,7 +427,7 @@ final class AirPlayMirror: ObservableObject {
     private func startVideoListener() -> String? {
         // Random per-run name: a fixed path let any local process predict
         // where to inject frames or race the helper's reconnect.
-        let path = NSTemporaryDirectory() + "record-iphone-airplay-\(UUID().uuidString).sock"
+        let path = NSTemporaryDirectory() + "record-idevice-airplay-\(UUID().uuidString).sock"
         var st = stat()
         if lstat(path, &st) == 0, st.st_uid == getuid() { unlink(path) }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)

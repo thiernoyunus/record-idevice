@@ -486,7 +486,7 @@ enum EditorLogicTests {
                CameraClipStatus.wantedButMissing.layoutMessage.contains("didn't save"))
         expect("phone-only message does not claim a failed save",
                !CameraClipStatus.phoneOnly.layoutMessage.contains("didn't save"))
-        let takeDir = URL(fileURLWithPath: "/tmp/record-iphone-take")
+        let takeDir = URL(fileURLWithPath: "/tmp/record-idevice-take")
         let phoneURL = takeDir.appendingPathComponent("phone.mov")
         let cameraURL = takeDir.appendingPathComponent("camera.mov")
         expect("phone-only source stays a phone source",

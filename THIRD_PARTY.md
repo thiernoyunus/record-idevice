@@ -44,7 +44,7 @@ Anyone who receives a copy of the app may obtain that complete source from
 this public repository, which is the corresponding-source location for
 every binary we ship:
 
-    https://github.com/thiernoyunus/record-iphone
+    https://github.com/thiernoyunus/record-idevice
 
 Use the git revision that built the app. Every packaged app records it in
 `Record iDevice.app/Contents/Resources/SOURCE_REVISION`, release builds refuse

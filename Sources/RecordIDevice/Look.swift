@@ -255,7 +255,7 @@ struct CapturePreset: Codable, Identifiable, Equatable {
 }
 
 enum PresetStore {
-    private static let key = "recordiphone.capturePresets"
+    private static let key = "recordidevice.capturePresets"
     static func load() -> [CapturePreset] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let list = try? JSONDecoder().decode([CapturePreset].self, from: data) else { return [] }

@@ -810,7 +810,7 @@ private struct DualReviewCanvas: View {
     @Binding var cameraSelected: Bool
     @State private var resizeStart: CGFloat?
     @State private var hoveringCamera = false
-    @AppStorage("recordiphone.didMoveCameraTip") private var didMoveCameraTip = false
+    @AppStorage("recordidevice.didMoveCameraTip") private var didMoveCameraTip = false
 
     var body: some View {
         GeometryReader { geo in

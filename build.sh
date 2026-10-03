@@ -50,13 +50,13 @@ swift build -c release
 APP="dist/Record iDevice.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp ".build/release/RecordIphone" "$APP/Contents/MacOS/Record iDevice"
+cp ".build/release/RecordIDevice" "$APP/Contents/MacOS/Record iDevice"
 cp ".build-airplay/airplay-helper" "$APP/Contents/MacOS/airplay-helper"
-if [ -d "Sources/RecordIphone/Resources/Wallpapers" ]; then
+if [ -d "Sources/RecordIDevice/Resources/Wallpapers" ]; then
   mkdir -p "$APP/Contents/Resources/Wallpapers"
   wallpaper_files=(
-    Sources/RecordIphone/Resources/Wallpapers/*.jpg(N)
-    Sources/RecordIphone/Resources/Wallpapers/*.mp4(N)
+    Sources/RecordIDevice/Resources/Wallpapers/*.jpg(N)
+    Sources/RecordIDevice/Resources/Wallpapers/*.mp4(N)
   )
   if (( ${#wallpaper_files} == 0 )); then
     echo "error: no wallpaper files found" >&2
@@ -84,7 +84,7 @@ TIMESTAMP=--timestamp=none
 codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
   "$APP/Contents/MacOS/airplay-helper"
 codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP \
-  --entitlements RecordIphone.entitlements \
+  --entitlements RecordIDevice.entitlements \
   "$APP"
 echo "Built: $APP"
 

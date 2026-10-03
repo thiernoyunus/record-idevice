@@ -916,7 +916,7 @@ final class CaptureEngine: NSObject, ObservableObject {
     /// Do not silently follow the Mac's default input — that jumps to AirPods
     /// whenever they connect. Remember the last pick, and skip headset mics.
     static func preferredMicrophone(from mics: [AVCaptureDevice]) -> AVCaptureDevice? {
-        let saved = UserDefaults.standard.string(forKey: "recordiphone.selectedMicID")
+        let saved = UserDefaults.standard.string(forKey: "recordidevice.selectedMicID")
         if let saved, let match = mics.first(where: { $0.uniqueID == saved }) {
             return match
         }
@@ -954,7 +954,7 @@ final class CaptureEngine: NSObject, ObservableObject {
         guard case .idle = phase else { return }
         let already = selectedMic?.uniqueID == mic.uniqueID && cameraSessionRunning
         selectedMic = mic
-        UserDefaults.standard.set(mic.uniqueID, forKey: "recordiphone.selectedMicID")
+        UserDefaults.standard.set(mic.uniqueID, forKey: "recordidevice.selectedMicID")
         if already { return }
         Task { await ensureMicPermissionAndStart() }
     }
