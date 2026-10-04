@@ -17,9 +17,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
-#include <net/if.h>
-#include <net/if_dl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -506,29 +503,14 @@ static void apply_features(dnssd_t *dnssd) {
 
 static int parse_mac(const char *str, char *out, int out_len) {
     int n = 0;
-    for (int i = 0; str[i] && n < out_len; i += 3) {
+    /* Stop at the terminator: stepping by 3 from "..:ff" lands one past
+       it, and reading leftover bytes there made a 6-byte MAC look like 7-8,
+       which the AirPlay announcement rejects. */
+    for (int i = 0; str[i] && str[i + 1] && n < out_len; i += 3) {
         char tmp[3] = { str[i], str[i + 1], 0 };
         out[n++] = (char)strtol(tmp, NULL, 16);
     }
     return n;
-}
-
-static void find_mac(char *out, size_t out_len) {
-    struct ifaddrs *ifap = NULL;
-    out[0] = 0;
-    if (getifaddrs(&ifap) != 0) return;
-    for (struct ifaddrs *p = ifap; p; p = p->ifa_next) {
-        if (!p->ifa_addr || p->ifa_addr->sa_family != AF_LINK) continue;
-        if (!(p->ifa_flags & IFF_UP) || (p->ifa_flags & IFF_LOOPBACK)) continue;
-        unsigned char *ptr = (unsigned char *)LLADDR((struct sockaddr_dl *)p->ifa_addr);
-        int nonzero = 0;
-        for (int i = 0; i < 6; i++) if (ptr[i]) nonzero++;
-        if (!nonzero) continue;
-        snprintf(out, out_len, "%02x:%02x:%02x:%02x:%02x:%02x",
-                 ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5]);
-        break;
-    }
-    freeifaddrs(ifap);
 }
 
 static void random_mac(char *out, size_t out_len) {
@@ -601,19 +583,41 @@ int main(int argc, char **argv) {
     }
     pthread_detach(video_thr);
 
-    char mac[32];
-    find_mac(mac, sizeof(mac));
-    if (!mac[0]) random_mac(mac, sizeof(mac));
+    /* iPhones/iPads remember a paired receiver by its device ID. If it
+       changes between runs they ask for the code again, so make one up
+       once and keep it. (The real MAC is no good: macOS often hands back
+       the 02:00:00:00:00:00 privacy placeholder.) */
+    char mac[32] = {0};
+    char idfile[1100];
+    snprintf(idfile, sizeof(idfile), "%s/airplay-deviceid", key_dir);
+    FILE *idf = fopen(idfile, "r");
+    if (idf) {
+        if (!fgets(mac, sizeof(mac), idf)) mac[0] = 0;
+        fclose(idf);
+        mac[strcspn(mac, "\r\n")] = 0;
+        if (strlen(mac) != 17) mac[0] = 0;
+    }
+    if (!mac[0]) {
+        random_mac(mac, sizeof(mac));
+        int fd = open(idfile, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd >= 0) {
+            (void)write(fd, mac, strlen(mac));
+            close(fd);
+        }
+    }
+    file_log("device id %s", mac);
 
-    char hw[8];
-    int hw_len = parse_mac(mac, hw, 8);
+    char hw[6];
+    int hw_len = parse_mac(mac, hw, 6);
     if (hw_len < 6) {
         fprintf(stderr, "bad MAC %s\n", mac);
         return 1;
     }
 
     int err = 0;
-    g_dnssd = dnssd_init(name, (int)strlen(name), hw, hw_len, 0, &err);
+    /* 1 = on-screen code, first time only (UxPlay's -pin). Devices that
+       entered it are kept in airplay-clients.txt and skip it afterwards. */
+    g_dnssd = dnssd_init(name, (int)strlen(name), hw, hw_len, 1, &err);
     if (!g_dnssd || err) {
         fprintf(stderr, "dnssd_init failed: %d\n", err);
         emit_event_fmt("{\"type\":\"error\",\"message\":\"Could not advertise on the local network (code %d).\"}", err);
@@ -678,6 +682,10 @@ int main(int argc, char **argv) {
     raop_set_plist(g_raop, "refreshRate", 60);
     raop_set_plist(g_raop, "maxFPS", 60);
     raop_set_plist(g_raop, "overscanned", 0);
+    /* Turns on the "already paired?" check in pair-verify; without it a
+       returning device gets no answer and is asked for the code again.
+       0 = new random code per first-time pairing. */
+    raop_set_plist(g_raop, "pin", 0);
 
     unsigned short tcp[2] = {0, 0};
     unsigned short udp[3] = {0, 0, 0};
