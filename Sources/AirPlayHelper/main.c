@@ -501,16 +501,13 @@ static void apply_features(dnssd_t *dnssd) {
     dnssd_set_airplay_features(dnssd, 42, 1); // current iPhones send HEVC for Screen Mirroring
 }
 
-static int parse_mac(const char *str, char *out, int out_len) {
-    int n = 0;
-    /* Stop at the terminator: stepping by 3 from "..:ff" lands one past
-       it, and reading leftover bytes there made a 6-byte MAC look like 7-8,
-       which the AirPlay announcement rejects. */
-    for (int i = 0; str[i] && str[i + 1] && n < out_len; i += 3) {
-        char tmp[3] = { str[i], str[i + 1], 0 };
-        out[n++] = (char)strtol(tmp, NULL, 16);
-    }
-    return n;
+/* Exactly "xx:xx:xx:xx:xx:xx" (hex), so a corrupted saved ID is replaced. */
+static bool parse_mac(const char *s, unsigned char hw[6]) {
+    int end = 0;
+    return strlen(s) == 17 &&
+           sscanf(s, "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx%n",
+                  &hw[0], &hw[1], &hw[2], &hw[3], &hw[4], &hw[5], &end) == 6 &&
+           end == 17;
 }
 
 static void random_mac(char *out, size_t out_len) {
@@ -594,10 +591,10 @@ int main(int argc, char **argv) {
     if (idf) {
         if (!fgets(mac, sizeof(mac), idf)) mac[0] = 0;
         fclose(idf);
-        mac[strcspn(mac, "\r\n")] = 0;
-        if (strlen(mac) != 17) mac[0] = 0;
     }
-    if (!mac[0]) {
+    mac[strcspn(mac, "\r\n")] = 0;
+    unsigned char hw[6];
+    if (!parse_mac(mac, hw)) {
         random_mac(mac, sizeof(mac));
         int fd = open(idfile, O_WRONLY | O_CREAT | O_TRUNC, 0600);
         if (fd >= 0) {
@@ -607,9 +604,7 @@ int main(int argc, char **argv) {
     }
     file_log("device id %s", mac);
 
-    char hw[6];
-    int hw_len = parse_mac(mac, hw, 6);
-    if (hw_len < 6) {
+    if (!parse_mac(mac, hw)) {
         fprintf(stderr, "bad MAC %s\n", mac);
         return 1;
     }
@@ -617,7 +612,7 @@ int main(int argc, char **argv) {
     int err = 0;
     /* 1 = on-screen code, first time only (UxPlay's -pin). Devices that
        entered it are kept in airplay-clients.txt and skip it afterwards. */
-    g_dnssd = dnssd_init(name, (int)strlen(name), hw, hw_len, 1, &err);
+    g_dnssd = dnssd_init(name, (int)strlen(name), (const char *)hw, 6, 1, &err);
     if (!g_dnssd || err) {
         fprintf(stderr, "dnssd_init failed: %d\n", err);
         emit_event_fmt("{\"type\":\"error\",\"message\":\"Could not advertise on the local network (code %d).\"}", err);

@@ -1502,7 +1502,7 @@ private struct WirelessWaitSheet: View {
                 .foregroundStyle(Frame.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                step(1, "On your iPhone or iPad, open Control Center (swipe down from the top-right corner)")
+                step(1, "On your iPhone or iPad, open Control Center")
                 step(2, "Tap Screen Mirroring")
                 step(3, "Tap Record iDevice")
             }
