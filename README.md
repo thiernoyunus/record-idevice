@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/header/graph.svg?title=Record+iDevice&subtitle=Mirror+and+record+your+iPhone+or+iPad+on+your+Mac&logo=apple&mode=dark" />
-    <img alt="Record iDevice" src="https://shieldcn.dev/header/graph.svg?title=Record+iDevice&subtitle=Mirror+and+record+your+iPhone+or+iPad+on+your+Mac&logo=apple&mode=light" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/header/graph.svg?title=Record+iDevice&subtitle=Mirror+and+record+your+iPhone+or+iPad+on+your+Mac&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fthiernoyunus%2Frecord-idevice%2Fmain%2F.github%2Fassets%2Ficon.png&mode=dark" />
+    <img alt="Record iDevice" src="https://shieldcn.dev/header/graph.svg?title=Record+iDevice&subtitle=Mirror+and+record+your+iPhone+or+iPad+on+your+Mac&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fthiernoyunus%2Frecord-idevice%2Fmain%2F.github%2Fassets%2Ficon.png&mode=light" />
   </picture>
 </p>
 
